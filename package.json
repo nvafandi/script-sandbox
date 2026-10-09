@@ -19,14 +19,13 @@
     "stdio",
     "ai-agent"
   ],
-  "homepage": "https://github.com/nvafandi/skills/tree/main/mcp/script-sandbox",
+  "homepage": "https://github.com/nvafandi/script-sandbox",
   "bugs": {
-    "url": "https://github.com/nvafandi/skills/issues"
+    "url": "https://github.com/nvafandi/script-sandbox/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nvafandi/skills.git",
-    "directory": "mcp/script-sandbox"
+    "url": "git+https://github.com/nvafandi/script-sandbox.git"
   },
   "license": "MIT",
   "author": "Nurvan Afandi <nurvan.afandi@gmail.com>",
