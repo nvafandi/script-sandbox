@@ -1,7 +1,7 @@
 {
   "name": "script-sandbox",
-  "version": "1.0.1",
-  "description": "MCP server (stdio) to run any script (PowerShell, bash, Python, Node, Ruby, Perl, Lua, PHP, R, batch, VBScript) and any executable inside a lightweight sandbox: per-run working dir, minimal env, timeout, logs, and per-language guardrails.",
+  "version": "1.1.0",
+  "description": "MCP server (stdio) to run any script (PowerShell, bash, Python, Node, Ruby, Perl, Lua, PHP, R, Java, batch, VBScript) and any executable inside a lightweight sandbox: per-run working dir, minimal env, timeout, logs, and per-language guardrails.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -15,6 +15,7 @@
     "perl",
     "lua",
     "php",
+    "java",
     "stdio",
     "ai-agent"
   ],

@@ -1,7 +1,7 @@
 # script-sandbox
 
 MCP server (stdio) for running **any script** (PowerShell, bash, Python, Node.js,
-Ruby, Perl, Lua, PHP, R, batch, VBScript) and **any executable** inside a
+Ruby, Perl, Lua, PHP, R, Java, batch, VBScript) and **any executable** inside a
 lightweight sandbox — without polluting your main working directory.
 
 The engine is registry-driven: the interpreter is chosen automatically from the
@@ -103,6 +103,7 @@ Extension → interpreter (resolved from the machine's `PATH` at startup):
 | `.lua` | Lua | `lua`, `lua54`, `luajit` |
 | `.php` | PHP | |
 | `.r` | R | `Rscript` |
+| `.java` | Java | `java file.java` (source-file mode, JEP 330) — JDK 11+; found on `PATH`, or in the usual Windows install folders (`C:\Program Files\Java`, `Eclipse Adoptium`, `Microsoft`, `Amazon Corretto`, `Zulu`, ...) |
 | `.bat` `.cmd` | CMD batch | Windows |
 | `.vbs` | VBScript | `cscript //B //Nologo` |
 
@@ -110,6 +111,18 @@ Interpreter not installed? The run is rejected with code `INCOMPATIBLE` plus
 the candidate names that were searched — or point to one manually:
 `SCRIPT_SANDBOX_SHELL_PYTHON=D:/Python/python.exe`.
 Call `sandbox_info` to see what is available on the current machine.
+
+Java runs in source-file mode (`java file.java`, JDK 11+), so the file has to
+be compilable Java: the launcher executes the **first top-level class**, and a
+`public` class must match the file name (the usual Java rule). Inline snippets
+via `run_code` get an auto-generated file name, so declare the class without
+`public`:
+
+```java
+class Main {
+  public static void main(String[] args) { System.out.println("hello"); }
+}
+```
 
 ## Isolation: what is and is not guaranteed
 

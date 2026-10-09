@@ -1,15 +1,15 @@
 /**
- * Test setup-clients.js terhadap file config tiruan di folder sementara.
+ * Test setup-clients.js against dummy config files in a temp folder.
  *
- * Yang diuji:
- *   - bentuk entry tiap client (standard / vscode / opencode)
- *   - merge: field user (autoApprove, disabled, ...) dipertahankan
- *   - idempoten: run kedua tidak menulis apa pun
- *   - JSONC ditolak, file asli tidak disentuh, blok manual dicetak
- *   - dry-run tidak menulis; argumen rusak -> exit 1
+ * What is tested:
+ *   - entry shape per client (standard / vscode / opencode)
+ *   - merge: user fields (autoApprove, disabled, ...) preserved
+ *   - idempotent: second run writes nothing
+ *   - JSONC rejected, original file untouched, manual block printed
+ *   - dry-run writes nothing; bad arguments -> exit 1
  *
- * Jalankan: node test/clients-check.mjs  (ikut `npm test`)
- * Tidak menyentuh config asli device: semua lewat --file ke folder tmp.
+ * Run: node test/clients-check.mjs  (part of `npm test`)
+ * Does not touch the device's real configs: everything uses --file to a tmp folder.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -34,44 +34,44 @@ function run(...args) {
   return { code: res.status, out: `${res.stdout || ''}${res.stderr || ''}` };
 }
 
-/** Ambil blok JSON pertama dari output (dipakai mode --print). */
+/** Extract the first JSON block from output (used by --print mode). */
 function firstJson(out) {
   return JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1));
 }
 
 try {
-  // 1) --help menyebut semua client; --list exit 0
+  // 1) --help mentions all clients; --list exits 0
   {
     const help = run('--help');
     assert.equal(help.code, 0, 'help exit 0');
     for (const id of ['opencode', 'claude-desktop', 'claude-code', 'cline', 'vscode', 'vscode-workspace', 'gemini', 'cursor', 'windsurf']) {
-      assert.ok(help.out.includes(id), `help menyebut ${id}`);
+      assert.ok(help.out.includes(id), `help mentions ${id}`);
     }
     assert.equal(run('--list').code, 0, 'list exit 0');
   }
 
-  // 2) --print: bentuk entry standard (gemini) dan vscode (type stdio)
+  // 2) --print: standard entry shape (gemini) and vscode (type stdio)
   {
     const gem = firstJson(run('--print', 'gemini').out);
     const g = gem.mcpServers['script-sandbox'];
     assert.equal(g.command, NODE, 'gemini: command = node');
-    assert.ok(g.args[0].endsWith('src/server.js'), 'gemini: args menunjuk server.js');
-    assert.equal(typeof g.env.SCRIPT_SANDBOX_ROOT, 'string', 'gemini: env ada');
+    assert.ok(g.args[0].endsWith('src/server.js'), 'gemini: args point to server.js');
+    assert.equal(typeof g.env.SCRIPT_SANDBOX_ROOT, 'string', 'gemini: env present');
 
     const vs = firstJson(run('--print', 'vscode').out);
     const v = vs.mcp.servers['script-sandbox'];
-    assert.equal(v.type, 'stdio', 'vscode: butuh type stdio');
+    assert.equal(v.type, 'stdio', 'vscode: requires type stdio');
     assert.equal(v.command, NODE);
 
     const oc = firstJson(run('--print', 'opencode').out);
     const o = oc.mcp.servers['script-sandbox'];
     assert.equal(o.type, 'local', 'opencode: type local');
     assert.ok(Array.isArray(o.command) && o.command.length === 2, 'opencode: command array');
-    assert.equal(typeof o.environment.SCRIPT_SANDBOX_ROOT, 'string', 'opencode: environment (bukan env)');
+    assert.equal(typeof o.environment.SCRIPT_SANDBOX_ROOT, 'string', 'opencode: environment (not env)');
     assert.deepEqual(o.timeout, { startup: 60000 }, 'opencode: timeout startup');
   }
 
-  // 3) tulis ke file tiruan: konten lama utuh, entry masuk, backup dibuat
+  // 3) write to dummy file: old content preserved, entry added, backup created
   {
     const file = path.join(tmp, 'claude_desktop_config.json');
     fs.writeFileSync(
@@ -80,20 +80,20 @@ try {
     );
 
     const first = run('--clients', 'claude-desktop', '--file', file);
-    assert.equal(first.code, 0, 'tulis exit 0');
-    assert.ok(first.out.includes('ditambahkan'), 'run pertama: ditambahkan');
+    assert.equal(first.code, 0, 'write exit 0');
+    assert.ok(first.out.includes('added'), 'first run: added');
 
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(cfg.mcpServers.other.command, 'x', 'konten lama tidak hilang');
+    assert.equal(cfg.mcpServers.other.command, 'x', 'old content not lost');
     assert.equal(cfg.mcpServers['script-sandbox'].command, NODE);
-    assert.ok(fs.existsSync(`${file}.bak.mcp`), 'backup .bak.mcp dibuat');
+    assert.ok(fs.existsSync(`${file}.bak.mcp`), 'backup .bak.mcp created');
 
-    // 4) idempoten: run kedua tidak menulis
+    // 4) idempotent: second run writes nothing
     const second = run('--clients', 'claude-desktop', '--file', file);
-    assert.ok(second.out.includes('sudah sama'), 'run kedua: sudah sama');
-    assert.ok(/0 berubah/.test(second.out), 'run kedua: 0 berubah');
+    assert.ok(second.out.includes('already identical'), 'second run: already identical');
+    assert.ok(/0 changed/.test(second.out), 'second run: 0 changed');
 
-    // 5) merge: field user dipertahankan saat server diperbarui
+    // 5) merge: user fields preserved when the server is updated
     cfg.mcpServers['script-sandbox'].autoApprove = ['run_script'];
     fs.writeFileSync(file, `${JSON.stringify(cfg, null, 2)}\n`);
     run('--clients', 'claude-desktop', '--file', file, '--server', path.join(ROOT, 'src', 'server.js'));
@@ -101,55 +101,55 @@ try {
     assert.deepEqual(
       merged.mcpServers['script-sandbox'].autoApprove,
       ['run_script'],
-      'field user (autoApprove) dipertahankan',
+      'user field (autoApprove) preserved',
     );
   }
 
-  // 6) JSONC: tidak disentuh, blok manual dicetak
+  // 6) JSONC: untouched, manual block printed
   {
     const file = path.join(tmp, 'cline_mcp_settings.json');
-    fs.writeFileSync(file, '{\n  // komentar user\n  "mcpServers": {}\n}\n');
+    fs.writeFileSync(file, '{\n  // user comment\n  "mcpServers": {}\n}\n');
     const res = run('--clients', 'cline', '--file', file);
-    assert.equal(res.code, 0, 'JSONC: exit 0 (bukan error)');
-    assert.ok(res.out.includes('tempel manual'), 'JSONC: status dilewati');
-    assert.ok(fs.readFileSync(file, 'utf8').includes('// komentar user'), 'file asli tidak diubah');
-    assert.ok(!fs.existsSync(`${file}.bak.mcp`), 'tanpa backup untuk file yang tidak disentuh');
+    assert.equal(res.code, 0, 'JSONC: exit 0 (not an error)');
+    assert.ok(res.out.includes('paste manually'), 'JSONC: status skipped');
+    assert.ok(fs.readFileSync(file, 'utf8').includes('// user comment'), 'original file unchanged');
+    assert.ok(!fs.existsSync(`${file}.bak.mcp`), 'no backup for an untouched file');
     const block = firstJson(res.out);
-    assert.ok(block.mcpServers['script-sandbox'].command, 'blok manual dicetak');
+    assert.ok(block.mcpServers['script-sandbox'].command, 'manual block printed');
   }
 
-  // 7) dry-run tidak menulis; --sandbox-root override env; --file boleh menembus
-  //    folder yang belum ada (dibuat otomatis)
+  // 7) dry-run writes nothing; --sandbox-root overrides env; --file may target
+  //    a folder that does not exist yet (created automatically)
   {
     const file = path.join(tmp, 'gemini-settings.json');
-    const dry = run('--clients', 'gemini', '--file', file, '--dry-run', '--sandbox-root', 'D:/contoh/sandbox');
-    assert.ok(dry.out.includes('akan dibuat'), 'dry-run: akan dibuat');
-    assert.ok(!fs.existsSync(file), 'dry-run tidak menulis file');
+    const dry = run('--clients', 'gemini', '--file', file, '--dry-run', '--sandbox-root', 'D:/example/sandbox');
+    assert.ok(dry.out.includes('will be created'), 'dry-run: would be created');
+    assert.ok(!fs.existsSync(file), 'dry-run does not write the file');
 
-    const real = run('--clients', 'gemini', '--file', file, '--sandbox-root', 'D:/contoh/sandbox');
+    const real = run('--clients', 'gemini', '--file', file, '--sandbox-root', 'D:/example/sandbox');
     assert.equal(real.code, 0);
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(
       cfg.mcpServers['script-sandbox'].env.SCRIPT_SANDBOX_ROOT,
-      'D:/contoh/sandbox',
-      'sandbox-root override dipakai',
+      'D:/example/sandbox',
+      'sandbox-root override applied',
     );
 
-    // --file ke parent yang belum ada: folder dibuat, file tetap terisi
-    const nested = path.join(tmp, 'belum-ada', 'gemini', 'settings.json');
+    // --file under a missing parent: folder created, file still written
+    const nested = path.join(tmp, 'does-not-exist', 'gemini', 'settings.json');
     const res = run('--clients', 'gemini', '--file', nested);
-    assert.ok(res.out.includes('dibuat baru'), 'parent folder belum ada tetap dibuat');
-    assert.ok(fs.existsSync(nested), 'file nested tercipta');
+    assert.ok(res.out.includes('created'), 'parent folder that does not exist yet is still created');
+    assert.ok(fs.existsSync(nested), 'nested file created');
   }
 
-  // 8) argumen rusak -> exit 1
+  // 8) bad arguments -> exit 1
   {
-    assert.equal(run('--clients', 'tidak-ada').code, 1, 'client tak dikenal: exit 1');
+    assert.equal(run('--clients', 'nonexistent').code, 1, 'unknown client: exit 1');
     const file = path.join(tmp, 'a.json');
     assert.equal(
       run('--clients', 'gemini,cline', '--file', file).code,
       1,
-      '--file + banyak client: exit 1',
+      '--file + multiple clients: exit 1',
     );
   }
 

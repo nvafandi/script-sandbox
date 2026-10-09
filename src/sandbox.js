@@ -33,50 +33,50 @@ export class SandboxError extends Error {
 
 function assertNoNul(value) {
   if (typeof value !== 'string' || value.includes('\0')) {
-    throw new SandboxError('Path tidak valid.', 'INVALID_PATH');
+    throw new SandboxError('Invalid path.', 'INVALID_PATH');
   }
 }
 
-/** Pastikan `target` berada di dalam `base` (anti path traversal / symlink escape). */
+/** Ensure `target` stays inside `base` (anti path traversal / symlink escape). */
 function resolveInside(base, target, label = 'path') {
   assertNoNul(target);
   const baseResolved = path.resolve(base);
   const resolved = path.resolve(baseResolved, target);
   const rel = path.relative(baseResolved, resolved);
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new SandboxError(`${label} berada di luar sandbox: ${target}`, 'PATH_ESCAPE');
+    throw new SandboxError(`${label} is outside the sandbox: ${target}`, 'PATH_ESCAPE');
   }
   return resolved;
 }
 
-/** Kalau target sudah ada, pastikan realpath-nya tetap di dalam base. */
+/** If the target already exists, ensure its realpath stays inside base. */
 async function assertRealpathInside(base, target, label = 'path') {
   let real;
   try {
     real = await fsp.realpath(target);
   } catch {
-    return target; // belum ada; tidak ada symlink untuk diperiksa
+    return target; // not there yet; no symlink to check
   }
   return resolveInside(await fsp.realpath(base), real, label);
 }
 
-/** Deteksi path absolut lintas-platform (POSIX, drive Windows, UNC). */
+/** Cross-platform absolute path detection (POSIX, Windows drive, UNC). */
 const ABSOLUTE_RE = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/;
 
-/** Resolusi nama script relatif terhadap folder scripts/. */
+/** Resolve a script name relative to the scripts/ folder. */
 export async function resolveScriptPath(name) {
   assertNoNul(name);
   if (path.isAbsolute(name) || ABSOLUTE_RE.test(name)) {
     throw new SandboxError(
-      'Gunakan path relatif terhadap folder scripts/ sandbox.',
+      'Use a path relative to the sandbox scripts/ folder.',
       'INVALID_PATH',
     );
   }
   const ext = extOf(name);
   if (!config.extensions.includes(ext)) {
     throw new SandboxError(
-      `Ekstensi tidak didukung: ${ext || '(tanpa ekstensi)'}. ` +
-        `Hanya ${config.extensions.join(', ')} yang bisa dipakai.`,
+      `Unsupported extension: ${ext || '(no extension)'}. ` +
+        `Only ${config.extensions.join(', ')} can be used.`,
       'INVALID_SCRIPT',
     );
   }
@@ -84,7 +84,7 @@ export async function resolveScriptPath(name) {
   return assertRealpathInside(config.dirs.scripts, target, 'script');
 }
 
-/** True kalau nama file berakhiran salah satu ekstensi yang diizinkan. */
+/** True if the file name ends with one of the allowed extensions. */
 function isScriptFile(name) {
   return config.extensions.includes(extOf(name));
 }
@@ -121,7 +121,7 @@ export async function writeScript({ name, content, overwrite = false }) {
   const bytes = Buffer.byteLength(content, 'utf8');
   if (bytes > config.maxScriptBytes) {
     throw new SandboxError(
-      `Ukuran script ${bytes} byte melebihi batas ${config.maxScriptBytes} byte.`,
+      `Script size ${bytes} bytes exceeds the ${config.maxScriptBytes}-byte limit.`,
       'TOO_LARGE',
     );
   }
@@ -129,14 +129,14 @@ export async function writeScript({ name, content, overwrite = false }) {
   const existed = fs.existsSync(target);
   if (existed && !overwrite) {
     throw new SandboxError(
-      `Script sudah ada: ${name}. Gunakan overwrite=true untuk menimpa.`,
+      `Script already exists: ${name}. Use overwrite=true to replace it.`,
       'ALREADY_EXISTS',
     );
   }
   await fsp.mkdir(path.dirname(target), { recursive: true });
   let body = content.replace(/^\uFEFF/, '');
-  // bash gagal kalau ada \r di akhir baris (`\r: command not found`), jadi .sh/.bash
-  // dinormalisasi ke LF. Dilaporkan balik supaya tidak diam-diam mengubah isi.
+  // bash fails on a trailing \r (`\r: command not found`), so .sh/.bash is
+  // normalized to LF. Reported back so contents are not changed silently.
   let normalizedCrlf = false;
   if ((extOf(target) === '.sh' || extOf(target) === '.bash') && config.normalizeShLineEndings && /\r/.test(body)) {
     body = body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -178,9 +178,9 @@ export async function deleteScript(name) {
 /* ------------------------------------------------------------- guardrails */
 
 /**
- * Scan baris terhadap guardrail bahasa tsb. Komentar dibuang dulu per bahasa
- * (#, //, --, REM, ') supaya contoh berbahaya di komentar tidak memblokir
- * script yang sebenarnya aman.
+ * Scan lines against that language's guardrails. Comments are stripped first
+ * per language (#, //, --, REM, ') so dangerous examples in comments do not
+ * block scripts that are actually safe.
  */
 export function scanDenied(content, kind = 'sh') {
   const patterns = denyPatternsFor(kind);
@@ -203,7 +203,7 @@ export function scanDenied(content, kind = 'sh') {
   return hits;
 }
 
-/** Scan teks bebas (args executable) terhadap SEMUA guardrail yang aktif. */
+/** Scan free text (executable args) against ALL active guardrails. */
 function scanArgsDenied(text) {
   const hits = [];
   for (const [kind, patterns] of Object.entries(config.denySets)) {
@@ -245,11 +245,12 @@ function clampTimeout(ms) {
 }
 
 /**
- * Susun argumen interpreter sesuai entri registry:
+ * Build interpreter arguments per the registry entry:
  * - powershell : <pre> -File <script> <args...>
  * - cmd        : /c <script> <args...>
+ * - java       : java <script.java> <args...> (source-file mode, JEP 330)
  * - vbs/sh/py/... : <pre> <script> <args...>
- * Git Bash (cygwin) menerima path Windows asal ditulis dengan forward slash.
+ * Git Bash (cygwin) accepts Windows paths as long as they use forward slashes.
  */
 function buildCommandArgs(entry, scriptPath, args) {
   const extra = args.map(String);
@@ -262,7 +263,7 @@ function truncate(text, maxBytes) {
   const buf = Buffer.from(text, 'utf8');
   if (buf.length <= maxBytes) return { text, truncated: false, bytes: buf.length };
   return {
-    text: `${buf.subarray(0, maxBytes).toString('utf8')}\n...[dipotong @ ${maxBytes} byte]`,
+    text: `${buf.subarray(0, maxBytes).toString('utf8')}\n...[truncated @ ${maxBytes} bytes]`,
     truncated: true,
     bytes: buf.length,
   };
@@ -272,17 +273,17 @@ function validateExtraEnv(extra = {}) {
   const entries = Object.entries(extra);
   if (entries.length > config.maxEnvVars) {
     throw new SandboxError(
-      `Maksimal ${config.maxEnvVars} env var tambahan per run.`,
+      `At most ${config.maxEnvVars} extra env vars per run.`,
       'INVALID_ENV',
     );
   }
   const clean = {};
   for (const [key, value] of entries) {
     if (!ENV_NAME_RE.test(key)) {
-      throw new SandboxError(`Nama env var tidak valid: ${key}`, 'INVALID_ENV');
+      throw new SandboxError(`Invalid env var name: ${key}`, 'INVALID_ENV');
     }
     if (typeof value !== 'string' || value.includes('\0')) {
-      throw new SandboxError(`Nilai env var tidak valid: ${key}`, 'INVALID_ENV');
+      throw new SandboxError(`Invalid env var value: ${key}`, 'INVALID_ENV');
     }
     clean[key] = value;
   }
@@ -294,13 +295,13 @@ function buildEnv(runId, runDir, extra) {
   for (const key of config.envAllowlist) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
-  // Folder temp diarahkan ke dalam sandbox supaya tidak mengotori folder user.
+  // Point the temp folder into the sandbox so it does not pollute the user's folder.
   env.TEMP = runDir;
   env.TMP = runDir;
   env.SCRIPT_SANDBOX = '1';
   env.SCRIPT_SANDBOX_ROOT = config.dirs.root;
   env.SCRIPT_SANDBOX_RUN_ID = runId;
-  // Kecilkan jejak interpreter yang ada di PATH.
+  // Shrink the footprint of interpreters found on PATH.
   env.PYTHONDONTWRITEBYTECODE = '1';
   env.PYTHONIOENCODING = 'utf-8';
   env.POWERSHELL_TELEMETRY_OPTOUT = '1';
@@ -333,14 +334,14 @@ async function pruneOld(dir, keep) {
 
 /* -------------------------------------------------------------- run engine */
 
-/** Pastikan interpreter untuk ekstensi ini tersedia, atau tolak dengan jelas. */
+/** Ensure the interpreter for this extension is available, or reject with a clear message. */
 function requireInterpreter(scriptPath) {
   const entry = shellFor(scriptPath);
-  if (!entry) return null; // sudah dicek resolveScriptPath
+  if (!entry) return null; // already checked by resolveScriptPath
   if (entry.missing) {
     throw new SandboxError(
-      `Interpreter untuk ${extOf(scriptPath)} (${entry.label}) tidak ditemukan di PATH. ` +
-        `Kandidat: ${entry.candidates.join(', ')}. Install dulu, atau arahkan via env ` +
+      `Interpreter for ${extOf(scriptPath)} (${entry.label}) not found on PATH. ` +
+        `Candidates: ${entry.candidates.join(', ')}. Install it first, or point via env ` +
         `SCRIPT_SANDBOX_SHELL_${entry.kind.toUpperCase()}=<path>.`,
       'INCOMPATIBLE',
     );
@@ -367,14 +368,14 @@ export async function runScript({
   const hits = scanDenied(await fsp.readFile(scriptPath, 'utf8'), entry.kind);
   if (hits.length > 0) {
     throw new SandboxError(
-      `Script diblokir guardrail: ${hits.map((h) => `baris ${h.line} (${h.reason})`).join(', ')}. ` +
-        'Set SCRIPT_SANDBOX_DENY=0 untuk menonaktifkan.',
+      `Script blocked by guardrails: ${hits.map((h) => `line ${h.line} (${h.reason})`).join(', ')}. ` +
+        'Set SCRIPT_SANDBOX_DENY=0 to disable.',
       'DENIED',
     );
   }
 
-  // Schema tool menyebut field `timeout_ms`, jadi terima nama itu (dan alias
-  // camelCase) — kalau tidak, nilai yang dikirim pemanggil diam-diam diabaikan.
+  // The tool schema mentions the `timeout_ms` field, so accept that name (and the
+  // camelCase alias) — otherwise the caller's value would be silently ignored.
   const limit = clampTimeout(timeout_ms ?? timeoutMs);
   const runId = `${stamp()}-${randomBytes(3).toString('hex')}`;
   const runDir = path.join(config.dirs.work, runId);
@@ -425,7 +426,7 @@ export async function runScript({
   return result;
 }
 
-/** Alias ekstensi -> kanonik, dipakai run_code untuk memilih bahasa. */
+/** Extension alias -> canonical, used by run_code to pick the language. */
 function extForLanguage(language) {
   const raw = String(language || '').toLowerCase().trim();
   const key = raw.startsWith('.') ? raw.slice(1) : raw;
@@ -437,19 +438,19 @@ function extForLanguage(language) {
   const alias = { javascript: 'js', node: 'js', shell: 'sh', bash: 'sh', powershell: 'ps1', batch: 'bat', rb: 'rb' };
   if (alias[key]) return `.${alias[key]}`;
   throw new SandboxError(
-    `Bahasa tidak dikenal: ${language}. Bahasa yang tersedia: ` +
+    `Unknown language: ${language}. Available languages: ` +
       config.interpreters.map((i) => `${i.kind} (${i.exts.join('/')})`).join(', '),
     'INVALID_LANGUAGE',
   );
 }
 
-/** Jalankan kode inline: ditulis ke file sementara di scripts/__inline/ lalu dieksekusi. */
+/** Run inline code: write it to a temporary file in scripts/__inline/ then execute it. */
 export async function runCode({ code, language = 'ps1', args = [], timeoutMs, timeout_ms, env = {}, label }) {
   assertNoNul(code);
   const ext = extForLanguage(language);
   if (!config.extensions.includes(ext)) {
     throw new SandboxError(
-      `Bahasa ${language} dinonaktifkan di device ini (ekstensi ${ext}).`,
+      `Language ${language} is disabled on this device (extension ${ext}).`,
       'INCOMPATIBLE',
     );
   }
@@ -467,18 +468,18 @@ export async function runCode({ code, language = 'ps1', args = [], timeoutMs, ti
       kind: 'inline',
     });
   } finally {
-    // writeScript menaruh file di scripts/__inline/, jadi hapus dari sana juga.
+    // writeScript puts the file in scripts/__inline/, so remove it from there too.
     await fsp.rm(path.join(config.dirs.scripts, '__inline', `inline-${runId}${ext}`), { force: true }).catch(() => {});
   }
 }
 
 /**
- * Jalankan executable apa pun (hasil build, tool CLI, biner hasil kompilasi).
- * - nama tanpa path dicari di PATH; path absolut dipakai apa adanya
- * - tetap memakai sandbox yang sama: cwd per-run, env minimal, timeout, log
- * - args di-scan guardrail sebelum jalan
- * CATATAN: biner native TIDAK bisa dibatasi oleh sandbox lembut ini —
- * jalankan hanya yang kamu percaya.
+ * Run any executable (build output, CLI tools, compiled binaries).
+ * - a bare name is looked up on PATH; an absolute path is used as-is
+ * - same sandbox as runs: per-run cwd, minimal env, timeout, logs
+ * - args are scanned against guardrails before running
+ * NOTE: native binaries CANNOT be constrained by this soft sandbox —
+ * only run what you trust.
  */
 export async function runExecutable({ executable, args = [], timeoutMs, timeout_ms, env = {}, label }) {
   await ensureLayout();
@@ -493,7 +494,7 @@ export async function runExecutable({ executable, args = [], timeoutMs, timeout_
     : findExecutableOnPath(executable);
   if (!resolved) {
     throw new SandboxError(
-      `Executable tidak ditemukan: ${executable}`,
+      `Executable not found: ${executable}`,
       'NOT_FOUND',
     );
   }
@@ -502,8 +503,8 @@ export async function runExecutable({ executable, args = [], timeoutMs, timeout_
   const hits = scanArgsDenied(argsText);
   if (hits.length > 0) {
     throw new SandboxError(
-      `Argumen diblokir guardrail: ${hits.map((h) => h.reason).join(', ')}. ` +
-        'Set SCRIPT_SANDBOX_DENY=0 untuk menonaktifkan.',
+      `Arguments blocked by guardrails: ${hits.map((h) => h.reason).join(', ')}. ` +
+        'Set SCRIPT_SANDBOX_DENY=0 to disable.',
       'DENIED',
     );
   }
@@ -556,7 +557,7 @@ export async function runExecutable({ executable, args = [], timeoutMs, timeout_
   return result;
 }
 
-/** Cari executable di PATH (PATHEXT-aware di Windows). */
+/** Find an executable on PATH (PATHEXT-aware on Windows). */
 function findExecutableOnPath(name) {
   const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
   const exts = config.isWindows
@@ -568,7 +569,7 @@ function findExecutableOnPath(name) {
       try {
         if (fs.existsSync(candidate)) return candidate;
       } catch {
-        /* folder tak terbaca, lanjut */
+        /* unreadable folder, keep going */
       }
     }
   }
@@ -599,8 +600,8 @@ function execute({ shell, shellArgs, childEnv, runDir, logDir, limit, startedAt,
       cwd: runDir,
       env: childEnv,
       windowsHide: true,
-      // Di Linux spawn jadi leader process group supaya killTree bisa menyapu
-      // seluruh anak dengan satu sinyal ke -pid.
+      // On Linux spawn becomes the process-group leader so killTree can sweep
+      // all descendants with a single signal to -pid.
       detached: !config.isWindows,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -664,7 +665,7 @@ function execute({ shell, shellArgs, childEnv, runDir, logDir, limit, startedAt,
   });
 }
 
-/** Matikan seluruh pohon proses: taskkill di Windows, sinyal process group di Linux. */
+/** Kill the whole process tree: taskkill on Windows, process-group signal on Linux. */
 function killTree(pid) {
   if (!pid) return;
   if (config.isWindows) {
@@ -678,7 +679,7 @@ function killTree(pid) {
     }
     return;
   }
-  // detached:true di spawn membuat child jadi leader group, jadi -pid = seluruh grup.
+  // detached:true in spawn makes the child a group leader, so -pid = the whole group.
   for (const signal of ['SIGTERM', 'SIGKILL']) {
     try {
       process.kill(-pid, signal);
@@ -686,7 +687,7 @@ function killTree(pid) {
       try {
         process.kill(pid, signal);
       } catch {
-        /* proses sudah mati */
+        /* process already dead */
       }
     }
   }
@@ -754,12 +755,12 @@ export async function sandboxInfo() {
 }
 
 /**
- * Jalankan interpreter sebentar untuk tahu apakah benar-benar bisa dipakai:
- * cek versi, lalu eksekusi no-op. `available` hanya true kalau resolved +
- * no-op jalan (kalau noopArgs didefinisikan).
+ * Run the interpreter briefly to see if it really works: check the version,
+ * then run a no-op. `available` is true only if resolved + the no-op runs
+ * (when noopArgs is defined).
  */
 function probeInterpreter(entry) {
-  if (entry.missing) return Promise.resolve({ available: false, version: null, error: 'interpreter tidak ditemukan' });
+  if (entry.missing) return Promise.resolve({ available: false, version: null, error: 'interpreter not found' });
 
   const run = (args) =>
     new Promise((done) => {
@@ -770,15 +771,45 @@ function probeInterpreter(entry) {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let out = '';
+      let errOut = '';
       child.stdout.on('data', (c) => (out += c.toString()));
+      child.stderr.on('data', (c) => (errOut += c.toString()));
       child.on('error', (err) => done({ ok: false, output: '', error: err.message }));
-      child.on('close', (code) => done({ ok: code === 0, output: out, error: code === 0 ? null : `exit ${code}` }));
+      child.on('close', (code) => {
+        if (code === 0) return done({ ok: true, output: out, error: null });
+        // Include the first error line so the cause of `available:false`
+        // reads clearly (e.g. "Error: Could not find or load main class"),
+        // not just "exit 1".
+        const detail = `${errOut}\n${out}`.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+        done({
+          ok: false,
+          output: out,
+          error: detail ? `exit ${code}: ${detail.slice(0, 200)}` : `exit ${code}`,
+        });
+      });
     });
 
   return (async () => {
     let available = true;
     let error = null;
-    if (entry.probe?.noopArgs) {
+    if (entry.probe?.noopFile) {
+      // Languages that need a build step (e.g. .java -> source-file mode) are
+      // verified with a real sample file, not just `--version`.
+      const dir = await fsp.mkdtemp(path.join(config.dirs.root, 'probe-'));
+      const file = path.join(dir, entry.probe.noopFile.name);
+      try {
+        await fsp.writeFile(file, entry.probe.noopFile.code, 'utf8');
+        const noop = await run([
+          ...entry.pre,
+          ...(entry.flag ? [entry.flag] : []),
+          file,
+        ]);
+        available = noop.ok;
+        error = noop.error;
+      } finally {
+        await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+    } else if (entry.probe?.noopArgs) {
       const noop = await run([...entry.pre, ...entry.probe.noopArgs]);
       available = noop.ok;
       error = noop.error;
@@ -827,7 +858,7 @@ async function countScripts(dir) {
 
 export const readLog = async (runId, which = 'stdout') => {
   assertNoNul(runId);
-  if (!RUN_ID_RE.test(runId)) throw new SandboxError('run_id tidak valid.', 'INVALID_PATH');
+  if (!RUN_ID_RE.test(runId)) throw new SandboxError('Invalid run_id.', 'INVALID_PATH');
   const file = path.join(config.dirs.logs, runId, `${which}.log`);
   await assertRealpathInside(config.dirs.logs, file, 'log');
   return { run_id: runId, which, content: await fsp.readFile(file, 'utf8') };

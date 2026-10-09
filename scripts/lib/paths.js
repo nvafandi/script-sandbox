@@ -1,10 +1,10 @@
 /**
- * Helper portabel untuk script setup powershell-sandbox-mcp.
+ * Portable helpers for the powershell-sandbox-mcp setup scripts.
  *
- * Prinsipnya sama dengan servernya: TIDAK ada path device yang ditulis tetap.
- * Semua lokasi di-resolve dari environment runtime (HOME, LOCALAPPDATA, PATH,
- * os.tmpdir, ...) supaya skrip yang sama jalan di Windows/macOS/Linux dan di
- * folder project mana pun.
+ * Same principle as the server: NO device path is hard-coded.
+ * Every location is resolved from the runtime environment (HOME, LOCALAPPDATA, PATH,
+ * os.tmpdir, ...) so the same scripts run on Windows/macOS/Linux and from
+ * any project folder.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,15 +14,15 @@ import { fileURLToPath } from 'node:url';
 
 export const SERVER_NAME = 'script-sandbox';
 
-/** Nama package di registry npm (berbeda dari nama server!). */
+/** Package name on the npm registry (different from the server name!). */
 export const PACKAGE_NAME = 'script-sandbox';
 
-/** Folder root package dari file yang memanggil (skrip di scripts/, lib di scripts/lib). */
+/** Package root folder of the calling file (scripts in scripts/, libs in scripts/lib). */
 export function packageRoot(fromFileUrl) {
   return path.resolve(path.dirname(fileURLToPath(fromFileUrl)), '..');
 }
 
-/** Folder data khusus user, menyesuaikan platform device. */
+/** Per-user data folder, adapting to the device platform. */
 export function userDataDir() {
   if (process.platform === 'win32') {
     return process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
@@ -33,7 +33,7 @@ export function userDataDir() {
   return process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
 }
 
-/** Folder config khusus user (XDG_CONFIG_HOME di Linux, ~/.config di lain). */
+/** Per-user config folder (XDG_CONFIG_HOME on Linux, ~/.config elsewhere). */
 export function userConfigDir() {
   if (process.platform === 'win32') {
     return process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
@@ -44,16 +44,16 @@ export function userConfigDir() {
   return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
 }
 
-/** Default root sandbox: os.tmpdir()/opencode/ps-sandbox (sama dengan src/config.js). */
+/** Default sandbox root: os.tmpdir()/opencode/ps-sandbox (same as src/config.js). */
 export function defaultSandboxRoot() {
   return path.join(os.tmpdir(), 'opencode', 'script-sandbox');
 }
 
 /**
- * Lokasi config OpenCode:
- * env `OPENCODE_CONFIG` (custom config file, sesuai dokumentasi OpenCode)
- * > lokasi global bawaan `~/.config/opencode/opencode.json` yang berlaku sama
- * di Windows/macOS/Linux.
+ * OpenCode config location:
+ * env `OPENCODE_CONFIG` (custom config file, per the OpenCode docs)
+ * > the built-in global `~/.config/opencode/opencode.json`, which applies the same
+ * on Windows/macOS/Linux.
  */
 export function defaultOpencodeConfigPath() {
   const fromEnv = process.env.OPENCODE_CONFIG;
@@ -61,15 +61,15 @@ export function defaultOpencodeConfigPath() {
   return path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
 }
 
-/** Path pakai separator depan, gaya config MCP yang umum. */
+/** Path with forward slashes, the common MCP config style. */
 export const toSlashes = (p) => String(p).replace(/\\/g, '/');
 
 /**
- * Expand placeholder path dari berbagai client:
- *   %APPDATA%/...  (Windows, gaya docs Claude/Cline)
+ * Expand path placeholders used by various clients:
+ *   %APPDATA%/...  (Windows, Claude/Cline docs style)
  *   $HOME/...      (Unix)
- *   ~/...          (semua platform)
- * Variabel yang tidak terisi dipertahankan apa adanya supaya terlihat jelas.
+ *   ~/...          (all platforms)
+ * Unset variables are left as-is so they stay visible.
  */
 export function expandPath(input) {
   const home = os.homedir();
@@ -80,8 +80,8 @@ export function expandPath(input) {
 }
 
 /**
- * Cari executable di PATH (lintas platform). Windows pakai PATHEXT
- * (.exe/.cmd/...) supaya `bash` tanpa ekstensi tetap ditemukan.
+ * Find an executable on PATH (cross-platform). Windows uses PATHEXT
+ * (.exe/.cmd/...) so `bash` without an extension is still found.
  */
 export function which(cmd) {
   const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
@@ -97,7 +97,7 @@ export function which(cmd) {
       try {
         if (fs.existsSync(candidate)) return candidate;
       } catch {
-        /* folder tak terbaca, lanjut */
+        /* unreadable folder, continue */
       }
     }
   }
@@ -105,10 +105,10 @@ export function which(cmd) {
 }
 
 /**
- * `npm` di Windows berupa npm.cmd, dan Node menolak spawn `.cmd` tanpa shell
- * (EINVAL). Karena itu npm dipanggil lewat npm-cli.js dengan node.exe —
- * tanpa shell, tanpa masalah quoting. `npm_execpath` tersedia saat skrip
- * dijalankan lewat `npm run`; fallback-nya instalasi npm bawaan node.
+ * `npm` on Windows is npm.cmd, and Node refuses to spawn `.cmd` without a shell
+ * (EINVAL). So npm is invoked via npm-cli.js with node.exe —
+ * no shell, no quoting issues. `npm_execpath` is available when the script
+ * runs via `npm run`; the fallback is node's bundled npm.
  */
 export function resolveNpmCli() {
   const candidates = [
@@ -118,11 +118,11 @@ export function resolveNpmCli() {
   return candidates.find((p) => p.endsWith('.js') && fs.existsSync(p)) || null;
 }
 
-/** Quote untuk cmd.exe, dipakai hanya pada fallback shell. */
+/** Quote for cmd.exe, used only on the shell fallback. */
 const quoteForCmd = (arg) =>
   /[\s"&|<>^()%!]/.test(arg) ? `"${String(arg).replace(/"/g, '""')}"` : arg;
 
-/** Jalankan npm lewat node + npm-cli.js (lihat resolveNpmCli). */
+/** Run npm via node + npm-cli.js (see resolveNpmCli). */
 export function runNpm(args, { cwd } = {}) {
   const npmCli = resolveNpmCli();
   const res = npmCli
@@ -145,13 +145,13 @@ export function runNpm(args, { cwd } = {}) {
   const stderr = res.stderr || '';
   if (res.status !== 0) {
     throw new Error(
-      `npm ${args.join(' ')} gagal (exit ${res.status})\n${(stdout + stderr).trim()}`,
+      `npm ${args.join(' ')} failed (exit ${res.status})\n${(stdout + stderr).trim()}`,
     );
   }
   return { stdout, stderr };
 }
 
-/** Ambil nilai dari objek lewat dot-path ("mcp.servers"), null kalau tidak ada. */
+/** Get a value from an object via dot-path ("mcp.servers"), null if missing. */
 export function getDotPath(obj, dotPath) {
   return dotPath
     .split('.')
@@ -159,7 +159,7 @@ export function getDotPath(obj, dotPath) {
     .reduce((acc, key) => (acc == null ? acc : acc[key]), obj);
 }
 
-/** Set nilai di objek lewat dot-path, membuat objek perantara yang belum ada. */
+/** Set a value in an object via dot-path, creating missing intermediate objects. */
 export function setDotPath(obj, dotPath, value) {
   const keys = dotPath.split('.').filter(Boolean);
   let cursor = obj;
@@ -172,11 +172,11 @@ export function setDotPath(obj, dotPath, value) {
 }
 
 /**
- * Cari file server.js yang terpasang, urutannya:
- * 1. --server <path> (diproses pemanggil)
- * 2. instalasi npm khusus MCP (userDataDir()/mcp-servers/powershell-sandbox)
- * 3. package tempat skrip ini berada (repo / hasil npm install package)
- * 4. instalasi npm global (node yang sama)
+ * Find an installed server.js, in this order:
+ * 1. --server <path> (handled by the caller)
+ * 2. dedicated MCP npm install (userDataDir()/mcp-servers/powershell-sandbox)
+ * 3. the package these scripts live in (repo / npm install of the package)
+ * 4. global npm install (same node)
  */
 export function resolveServerPath(explicit, packageDir) {
   const candidates = [

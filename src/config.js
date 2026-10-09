@@ -3,15 +3,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * Konfigurasi script-sandbox.
+ * script-sandbox configuration.
  *
- * Keunggulan desain: eksekusi tidak ditulis per bahasa di engine — semuanya
- * dideklarasikan di REGISTRY (ekstensi -> interpreter -> gaya argumen ->
- * guardrail). Menambah bahasa baru = menambah entri, bukan menambah cabang
- * logika. Interpreter di-resolve dari PATH device saat start (portabel).
+ * Design highlight: execution is not written per language in the engine —
+ * everything is declared in REGISTRY (extension -> interpreter -> argument
+ * style -> guardrail). Adding a new language = adding an entry, not another
+ * logic branch. Interpreters are resolved from the device PATH at startup.
  */
 
-/** Env allowlist: hanya variabel ini yang diteruskan ke child process. */
+/** Env allowlist: only these variables are forwarded to the child process. */
 const ENV_ALLOWLIST = [
   'SystemRoot',
   'SystemDrive',
@@ -48,7 +48,7 @@ function boolEnv(name, fallback) {
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
 }
 
-/** Daftar nilai dipisah koma, lowercase, tanpa spasi. */
+/** Comma-separated list of values, lowercased and trimmed. */
 function listEnv(name) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return [];
@@ -60,14 +60,14 @@ function listEnv(name) {
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/** Root sandbox: selalu di folder temp OS device (portabel). */
+/** Sandbox root: always in the OS temp folder of the device (portable). */
 const root = path.resolve(
   process.env.SCRIPT_SANDBOX_ROOT || path.join(os.tmpdir(), 'opencode', 'script-sandbox'),
 );
 
 /**
- * Cari executable pertama di PATH. Windows dicek pakai PATHEXT
- * (.exe/.cmd/...) supaya bisa juga menemukan `python` tanpa ekstensi.
+ * Find the first executable on PATH. On Windows candidates are checked with
+ * PATHEXT (.exe/.cmd/...) so `python` is also found without an extension.
  */
 function findOnPath(names) {
   const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
@@ -77,7 +77,7 @@ function findOnPath(names) {
       try {
         if (fs.existsSync(candidate)) return candidate;
       } catch {
-        /* folder tak terbaca, lanjut */
+        /* unreadable folder, keep going */
       }
     }
   }
@@ -85,13 +85,13 @@ function findOnPath(names) {
 }
 
 /**
- * Shell POSIX untuk .sh/.bash.
- * Di Windows, `bash.exe` bawaan WindowsApps cuma launcher interop WSL yang
- * merusak path Windows, jadi Git Bash (cygwin) yang diprioritaskan:
- * 1. PATH, asal bukan WindowsApps dan foldernya mengandung "Git"
- * 2. lokasi install umum (Git bisa terpasang di luar PATH)
- * 3. PATH mana pun selain WindowsApps
- * 4. 'bash' — biarkan spawn yang mencari di PATH
+ * POSIX shell for .sh/.bash.
+ * On Windows the stock WindowsApps `bash.exe` is just a WSL interop launcher
+ * that mangles Windows paths, so Git Bash (cygwin) is preferred:
+ * 1. PATH, as long as it is not WindowsApps and the folder contains "Git"
+ * 2. common install locations (Git may be installed outside PATH)
+ * 3. any PATH entry other than WindowsApps
+ * 4. 'bash' — let spawn search PATH
  */
 function defaultShShell() {
   if (!IS_WINDOWS) return 'bash';
@@ -110,12 +110,57 @@ function defaultShShell() {
   return 'bash';
 }
 
+/**
+ * `java` fallback outside PATH (Windows). Many JDK installs (manual zips
+ * from Temurin/Adoptium, Oracle, Corretto, Zulu, ...) never add their folder
+ * to PATH even though `java` is still usable. Scan common vendor locations
+ * and pick the highest version. (Non-Windows: PATH is enough.)
+ */
+function defaultJavaBin() {
+  if (!IS_WINDOWS) return null;
+  const roots = [
+    'C:\\Program Files\\Java',
+    'C:\\Program Files\\Eclipse Adoptium',
+    'C:\\Program Files\\Microsoft',
+    'C:\\Program Files\\Amazon Corretto',
+    'C:\\Program Files\\Zulu',
+    'C:\\Program Files\\BellSoft',
+    'C:\\Program Files\\OpenJDK',
+    'C:\\Program Files (x86)\\Java',
+  ];
+  const score = (name) => {
+    const match = name.match(/\d+/);
+    return match ? Number.parseInt(match[0], 10) : 0;
+  };
+  let best = null;
+  let bestScore = -1;
+  for (const root of roots) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue; // folder missing / unreadable
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const bin = path.join(root, entry.name, 'bin', 'java.exe');
+      if (!fs.existsSync(bin)) continue;
+      const value = score(entry.name);
+      if (value > bestScore) {
+        bestScore = value;
+        best = bin;
+      }
+    }
+  }
+  return best;
+}
+
 /* ------------------------------------------------------------- guardrails */
 
 /**
- * Guardrail ringan (BUKAN security boundary) dikelompokkan per keluarga OS/
- * bahasa supaya tidak ada false positive lintas bahasa. Nonaktifkan dengan
- * SCRIPT_SANDBOX_DENY=0, atau per kind dengan SCRIPT_SANDBOX_DENY_OFF=sh,python.
+ * Lightweight guardrails (NOT a security boundary), grouped per OS/language
+ * family to avoid cross-language false positives. Disable with
+ * SCRIPT_SANDBOX_DENY=0, or per kind with SCRIPT_SANDBOX_DENY_OFF=sh,python.
  */
 const PS_DENY = [
   { re: /\bFormat-Volume\b/i, reason: 'Format-Volume' },
@@ -124,7 +169,7 @@ const PS_DENY = [
   { re: /\bRemove-Partition\b/i, reason: 'Remove-Partition' },
   {
     re: /\bRemove-Item\b[^\n]*-[^\n]*\b-[rR]ecurse\b[^\n]*\b([A-Za-z]:\\|C:\\|D:\\|E:\\)\s*$/i,
-    reason: 'Remove-Item -Recurse pada drive root',
+    reason: 'Remove-Item -Recurse on drive root',
   },
   { re: /\brd\s+\/[sq]\b/i, reason: 'rd /s' },
   { re: /\bformat\s+[a-z]:/i, reason: 'format drive' },
@@ -147,41 +192,86 @@ const WIN_DENY = [
   { re: /\bbcdedit\b/i, reason: 'bcdedit' },
 ];
 
+/**
+ * Machine-power patterns, kept as named consts: UNIX_FS_DENY below filters by
+ * reference (not by the human-readable reason), so rewording a reason can
+ * never silently change which guardrails are shared.
+ */
+const MACHINE_POWER_RE = /\b(shutdown|reboot|halt|poweroff)\b/i;
+const MACHINE_POWER_INIT_RE = /\binit\s+[06]\b/;
+
 const UNIX_DENY = [
   { re: /\brm\b[^\n]*\s-[a-z]*[rf][a-z]*[^\n]*\s\/(?:\s|$)/, reason: 'rm -rf /' },
   { re: /\brm\b[^\n]*\s--no-preserve-root\b/i, reason: 'rm --no-preserve-root' },
   { re: /\bmkfs(\.[a-z0-9]+)?\b/i, reason: 'mkfs' },
   { re: /\bwipefs\b/i, reason: 'wipefs' },
-  { re: /\bdd\b[^\n]*\bof=\/dev\//i, reason: 'dd ke device' },
-  { re: />\s*\/dev\/(sd|nvme|hd|disk)/i, reason: 'tulis ke device blok' },
+  { re: /\bdd\b[^\n]*\bof=\/dev\//i, reason: 'dd to device' },
+  { re: />\s*\/dev\/(sd|nvme|hd|disk)/i, reason: 'write to block device' },
   { re: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?\s*:/, reason: 'fork bomb' },
-  { re: /\bchmod\b[^\n]*\s-[a-z]*r[a-z]*[^\n]*\s\/(?:\s|$)/i, reason: 'chmod rekursif pada root' },
-  { re: /\b(shutdown|reboot|halt|poweroff)\b/i, reason: 'matikan mesin' },
-  { re: /\binit\s+[06]\b/, reason: 'init 0/6' },
+  { re: /\bchmod\b[^\n]*\s-[a-z]*r[a-z]*[^\n]*\s\/(?:\s|$)/i, reason: 'recursive chmod on root' },
+  { re: MACHINE_POWER_RE, reason: 'shut down machine' },
+  { re: MACHINE_POWER_INIT_RE, reason: 'init 0/6' },
   { re: /\bshred\b[^\n]*\s\/dev\//i, reason: 'shred device' },
 ];
 
 const PY_DENY = [
   { re: /\bshutil\.rmtree\(\s*['"]\/['"]/i, reason: 'shutil.rmtree root' },
-  { re: /\bos\.system\(\s*['"][^\n]*(mkfs|dd\s+[^\n]*of=\/dev\/)/i, reason: 'perintah destruktif via os.system' },
-  { re: /open\(\s*['"]\/dev\/(sd|nvme|hd)/i, reason: 'tulis langsung ke device blok' },
+  { re: /\bos\.system\(\s*['"][^\n]*(mkfs|dd\s+[^\n]*of=\/dev\/)/i, reason: 'destructive command via os.system' },
+  { re: /open\(\s*['"]\/dev\/(sd|nvme|hd)/i, reason: 'direct write to block device' },
 ];
 
 const NODE_DENY = [
-  { re: /\brm(Sync)?\(\s*['"]\/['"][^\n]*recursive/i, reason: 'fs rm root rekursif' },
-  { re: /\bexec(Sync)?\(\s*['"][^\n]*(mkfs|dd\s+[^\n]*of=\/dev\/)/i, reason: 'perintah destruktif via child_process' },
+  { re: /\brm(Sync)?\(\s*['"]\/['"][^\n]*recursive/i, reason: 'recursive fs rm of root' },
+  { re: /\bexec(Sync)?\(\s*['"][^\n]*(mkfs|dd\s+[^\n]*of=\/dev\/)/i, reason: 'destructive command via child_process' },
 ];
 
 /**
- * Registry interpreter.
- * - exts      : ekstensi yang ditangani (lowercase)
- * - candidates: urutan { bin, pre, flag } — bin dicari di PATH; pre = argumen
- *               sebelum script; flag = penanda script ('-File'), null = langsung
- * - comment   : prefiks komentar (dibuang sebelum scan guardrail)
- * - probe     : { versionArgs, noopArgs } untuk verifikasi di sandbox_info
+ * UNIX patterns shared by common VM-based languages (Java, ...): only the
+ * ones that damage the filesystem. The `shutdown|reboot|halt` and `init 0/6`
+ * patterns are intentionally excluded — those words are common as identifiers
+ * in code (e.g. `executor.shutdown()`) and would block scripts that are
+ * actually safe.
+ */
+const UNIX_FS_DENY = UNIX_DENY.filter(
+  (d) => d.re !== MACHINE_POWER_RE && d.re !== MACHINE_POWER_INIT_RE,
+);
+
+const JAVA_DENY = [
+  {
+    re: /\.\s*exec\s*\([^;\n]*(\brm\b|mkfs|wipefs|\bdd\b[^\n]*of=\/dev\/)/i,
+    reason: 'destructive command via Runtime.exec',
+  },
+  {
+    re: /new\s+(?:[A-Za-z_$][\w$]*\s*\.\s*)*ProcessBuilder\s*\([^)]*(\brm\b|mkfs|wipefs|\bdd\b[^\n]*of=\/dev\/)/i,
+    reason: 'destructive command via ProcessBuilder',
+  },
+  {
+    // qualified name (new java.io.File("/")) as well as bare (new File("/"))
+    re: /new\s+(?:[A-Za-z_$][\w$]*\s*\.\s*)*File\s*\(\s*"\/"\s*\)\s*\.\s*delete/i,
+    reason: 'delete root via File.delete',
+  },
+  {
+    re: /Files\.walk(?:File)?\s*\(\s*(?:Paths?\.get|Path\.of)\s*\(\s*"\/"\s*\)/i,
+    reason: 'recursive from root via Files.walk',
+  },
+];
+
+/** Result of scanning common Windows locations for `java` (once at startup). */
+const JAVA_FALLBACK_BIN = defaultJavaBin();
+
+/**
+ * Interpreter registry.
+ * - exts      : handled extensions (lowercase)
+ * - candidates: ordered { bin, pre, flag } — bin is looked up on PATH; pre =
+ *               arguments before the script; flag = script marker ('-File'),
+ *               null = direct
+ * - comment   : comment prefix (stripped before the guardrail scan)
+ * - probe     : { versionArgs, noopArgs | noopFile } for verification in
+ *               sandbox_info; noopFile = write a sample file then run it via
+ *               the interpreter (for languages needing a build step, e.g. .java)
  *
- * Menambah bahasa = tambah entri di sini. Interpreter di-resolve dari PATH
- * device; kalau tidak ada, run akan menolak dengan pesan yang jelas.
+ * Adding a language = add an entry here. Interpreters are resolved from the
+ * device PATH; if missing, run rejects with a clear message.
  */
 const REGISTRY = [
   {
@@ -284,6 +374,29 @@ const REGISTRY = [
     probe: { versionArgs: ['--version'], noopArgs: ['-e', 'quit()'] },
   },
   {
+    kind: 'java',
+    label: 'Java',
+    exts: ['.java'],
+    candidates: [
+      { bin: 'java', pre: [], flag: null },
+      // if `java` is not on PATH, fall back to an install in common Windows locations
+      ...(JAVA_FALLBACK_BIN ? [{ bin: JAVA_FALLBACK_BIN, pre: [], flag: null }] : []),
+    ],
+    comment: ['//'],
+    deny: 'java',
+    // `java file.java` (source-file mode, JEP 330 / JDK 11+) compiles in
+    // memory then runs the first class in the file. So the noop probe is a
+    // real .java file: `java -version` still runs on a JRE without javac /
+    // on Java 8, while a .java file cannot be executed there.
+    probe: {
+      versionArgs: ['--version'],
+      noopFile: {
+        name: 'Probe.java',
+        code: 'public class Probe { public static void main(String[] args) { } }\n',
+      },
+    },
+  },
+  {
     kind: 'cmd',
     label: 'CMD (batch)',
     exts: ['.bat', '.cmd'],
@@ -305,7 +418,7 @@ const REGISTRY = [
   },
 ];
 
-/** Resolver satu entri registry: override env > kandidat pertama di PATH. */
+/** Resolver for a single registry entry: env override > first candidate on PATH. */
 function resolveInterpreter(def) {
   const override = process.env[`SCRIPT_SANDBOX_SHELL_${def.kind.toUpperCase()}`];
   const candidates = override
@@ -350,21 +463,21 @@ function resolveInterpreter(def) {
   };
 }
 
-/** Resolve semua interpreter yang relevan untuk platform ini. */
+/** Resolve all interpreters relevant to this platform. */
 const interpreters = REGISTRY.filter((def) => !def.winOnly || IS_WINDOWS).map(
   resolveInterpreter,
 );
 
-/** Map ekstensi -> interpreter (ext default ditambah override user). */
+/** Map extension -> interpreter (default exts plus user overrides). */
 const shells = {};
 for (const entry of interpreters) {
   for (const ext of entry.exts) shells[ext] = entry;
 }
 
 /**
- * Ekstensi yang boleh ditulis/dijalankan.
- * Override: SCRIPT_SANDBOX_EXTENSIONS=".py,.js" (hanya membatasi, bukan
- * menambah — bahasa tanpa interpreter tetap tidak akan bisa jalan).
+ * Extensions allowed to be written/executed.
+ * Override: SCRIPT_SANDBOX_EXTENSIONS=".py,.js" (only restricts, never adds —
+ * a language without an interpreter still cannot run).
  */
 const overrideExts = listEnv('SCRIPT_SANDBOX_EXTENSIONS');
 const extensions =
@@ -372,7 +485,7 @@ const extensions =
 
 const denyOff = new Set(listEnv('SCRIPT_SANDBOX_DENY_OFF'));
 const denyEnabled = boolEnv('SCRIPT_SANDBOX_DENY', true);
-const DENY_SETS = { powershell: PS_DENY, cmd: WIN_DENY, sh: UNIX_DENY, unix: UNIX_DENY, python: [...UNIX_DENY, ...PY_DENY], node: [...UNIX_DENY, ...NODE_DENY] };
+const DENY_SETS = { powershell: PS_DENY, cmd: WIN_DENY, sh: UNIX_DENY, unix: UNIX_DENY, python: [...UNIX_DENY, ...PY_DENY], node: [...UNIX_DENY, ...NODE_DENY], java: [...UNIX_FS_DENY, ...JAVA_DENY] };
 
 export const config = {
   root,
@@ -386,14 +499,14 @@ export const config = {
   interpreters,
   extensions,
   shells,
-  /** Normalisasi CRLF -> LF saat menulis .sh/.bash (bash gagal kalau ada \r). */
+  /** Normalize CRLF -> LF when writing .sh/.bash (bash fails on \r). */
   normalizeShLineEndings: boolEnv('SCRIPT_SANDBOX_SH_NORMALIZE_EOL', true),
   defaultTimeoutMs: intEnv('SCRIPT_SANDBOX_DEFAULT_TIMEOUT_MS', 120_000),
   maxTimeoutMs: intEnv('SCRIPT_SANDBOX_MAX_TIMEOUT_MS', 600_000),
-  /** Batas byte output yang dikembalikan ke pemanggil (sisanya dipotong + disimpan penuh di log). */
+  /** Byte cap for output returned to the caller (the rest is truncated + kept in full in the log). */
   maxOutputBytes: intEnv('SCRIPT_SANDBOX_MAX_OUTPUT_BYTES', 200_000),
   maxConcurrent: intEnv('SCRIPT_SANDBOX_MAX_CONCURRENT', 2),
-  /** Jumlah run terbaru yang tetap disimpan di disk. */
+  /** Number of recent runs kept on disk. */
   keepRuns: intEnv('SCRIPT_SANDBOX_KEEP_RUNS', 50),
   maxScriptBytes: intEnv('SCRIPT_SANDBOX_MAX_SCRIPT_BYTES', 1_000_000),
   maxEnvVars: 20,
@@ -405,23 +518,23 @@ export const config = {
 
 export default config;
 
-/** Ekstensi (lowercase, berekstensi titik) dari nama file script. */
+/** Extension (lowercase, dot-prefixed) of a script file name. */
 export function extOf(name) {
   return path.extname(String(name)).toLowerCase();
 }
 
-/** Interpreter untuk sebuah nama file, atau null kalau ekstensinya tidak didukung. */
+/** Interpreter for a file name, or null if its extension is unsupported. */
 export function shellFor(name) {
   return config.shells[extOf(name)] || null;
 }
 
-/** Daftar guardrail sesuai bahasa script. */
+/** Guardrail list for the script's language. */
 export function denyPatternsFor(kind) {
   if (!config.denyEnabled || config.denyOff.has(kind)) return [];
   return config.denySets[kind] || [];
 }
 
-/** Prefiks komentar sesuai bahasa (dibuang sebelum scan guardrail). */
+/** Comment prefixes for the language (stripped before the guardrail scan). */
 export function commentPrefixesFor(kind) {
   const entry = config.interpreters.find((i) => i.kind === kind);
   return entry ? entry.comment : ['#'];
