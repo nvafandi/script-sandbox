@@ -279,16 +279,23 @@ Publishing runs automatically from GitHub Actions
 no token, no `npm publish` from your machine. Provenance attestations are
 added automatically.
 
-```bash
-npm version patch           # bump version (commit + annotated tag)
-git push origin main --follow-tags
-```
+- **Pull request → `main`**: the full test suite runs on `windows-latest`
+  (validation only — a PR never publishes).
+- **Merging the PR into `main`**: tests run again, then the new version is
+  published — but only if the head commit belongs to the merged PR, the push
+  changed `package.json`, and that version is not on the registry yet.
+  Direct pushes to `main` run the tests only.
+- **Run workflow** (manual): always tries to publish the current
+  `package.json` version — the escape hatch for versions whose bump did not
+  go through a PR.
 
-CI runs the full test suite on `windows-latest` and publishes only when that
-version is not on the registry yet **and** the push changed `package.json`.
-Pushes without a version bump just run the tests; `workflow_dispatch` (Run
-workflow) always tries, which is also the recovery path if a publish needs to
-be repeated.
+```bash
+npm version patch --no-git-tag-version   # bump package.json + package-lock.json
+git commit -am "chore: release x.y.z"    # on the PR branch
+git push                                 # merge the PR -> CI publishes
+# optional bookkeeping after the merge:
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
 
 One-time setup on npmjs.com — **Packages → script-sandbox → Settings →
 Trusted publishing → GitHub Actions**:
