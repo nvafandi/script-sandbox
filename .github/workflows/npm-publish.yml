@@ -22,6 +22,9 @@
 #     Rules: npm CLI >= 11.5.1 + Node >= 22.14 (the publish job installs the
 #     newest npm), and the configuration expires unless the first publish
 #     succeeds within 2 days of creating it.
+#     The workflow must ALSO grant `id-token: write` (see permissions below):
+#     without it GitHub does not expose ACTIONS_ID_TOKEN_REQUEST_URL to the job,
+#     npm cannot request an OIDC token, and the publish fails with ENEEDAUTH.
 #   Provenance: generated automatically by npm for OIDC publishes from a
 #     public GitHub repo — no flag needed.
 #   Security           : job `scan` runs the Snyk dependency scan (npx snyk
@@ -40,6 +43,10 @@ on:
 
 permissions:
   contents: read
+  # Required for npm Trusted Publishing: lets GitHub issue the short-lived OIDC
+  # token that npm exchanges for a registry token. Without this permission the
+  # publish fails with ENEEDAUTH (npm falls back to classic token auth).
+  id-token: write
 
 # One run per ref: superseded PR runs are cancelled, main runs are not.
 concurrency:
