@@ -177,8 +177,8 @@ register(
     description:
       'Sandbox information: the root/scripts/work/logs folders, languages + interpreters available ' +
       'on this device (with versions), limits, per-language guardrails, env allowlist, file count, ' +
-      'and the framework file-log redirect (Spring Boot / Quarkus file logs are written into ' +
-      'logs/<run_id>/ so running a project never drops .log files into its folder).',
+      'and the file-log redirect (Spring Boot / Quarkus built in, any other stack via ' +
+      'SCRIPT_SANDBOX_LOG_VARS; the files land in logs/<run_id>/ so running a project never drops .log files into its folder).',
     inputSchema: {},
   },
   wrap(async () => ok(await sandboxInfo())),

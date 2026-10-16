@@ -61,6 +61,9 @@ if (configPath) {
 }
 
 /* ------------------------------------------------------- local mode (import) */
+// Exercise the universal log-var mapping: one valid custom target (any stack)
+// plus entries that must be dropped (path escape, invalid var name).
+process.env.SCRIPT_SANDBOX_LOG_VARS = 'CUSTOM_LOG_FILE=custom.log,ESCAPING=../escape.log,bad name=x.log';
 const { default: config } = await import('../src/config.js');
 const { runScript, sandboxInfo, writeScript, scanDenied } = await import('../src/sandbox.js');
 
@@ -77,6 +80,10 @@ assert.ok(config.fsMaxWriteBytes > 0 && config.fsMaxMediaBytes > 0, 'fs size cap
 assert.equal(config.logRedirect, true, 'framework log redirect on by default');
 assert.ok(config.fileLogVars.LOGGING_FILE_NAME, 'Spring Boot target registered');
 assert.ok(config.fileLogVars.QUARKUS_LOG_FILE_PATH, 'Quarkus target registered');
+// SCRIPT_SANDBOX_LOG_VARS merges extra targets over the built-ins; invalid entries are dropped.
+assert.equal(config.fileLogVars.CUSTOM_LOG_FILE, 'custom.log', 'custom log target merged');
+assert.ok(!('ESCAPING' in config.fileLogVars), 'path escape in a log file name dropped');
+assert.ok(!('bad name' in config.fileLogVars), 'invalid log var name dropped');
 
 console.log('root     :', config.dirs.root);
 console.log('extensions:', config.extensions.join(', '));
