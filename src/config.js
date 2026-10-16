@@ -69,6 +69,27 @@ function pathListEnv(name) {
     .map((item) => path.resolve(item));
 }
 
+/**
+ * Extra file-log targets: SCRIPT_SANDBOX_LOG_VARS="WORKER_LOG=worker.log,APP_LOG=app.log"
+ * (env var -> file name under logs/<run_id>/). Entries that are not
+ * VAR=filename, or whose file name could escape the run folder, are dropped.
+ */
+function logVarsEnv() {
+  const raw = process.env.SCRIPT_SANDBOX_LOG_VARS;
+  const out = {};
+  if (raw === undefined || raw === '') return out;
+  for (const item of raw.split(',')) {
+    const eq = item.indexOf('=');
+    if (eq < 1) continue;
+    const name = item.slice(0, eq).trim();
+    const file = item.slice(eq + 1).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+    if (!/^[A-Za-z0-9._-]+$/.test(file) || file.includes('..')) continue;
+    out[name] = file;
+  }
+  return out;
+}
+
 const IS_WINDOWS = process.platform === 'win32';
 
 /** Sandbox root: always in the OS temp folder of the device (portable). */
@@ -537,15 +558,17 @@ export const config = {
   maxEnvVars: 20,
   envAllowlist: ENV_ALLOWLIST,
   /**
-   * Framework file logs are redirected into the run's log folder (applied in
-   * buildEnv): env var -> file name. Env outranks application.properties/yml in
-   * Spring Boot and Quarkus, so this holds no matter which folder the process
-   * runs in — a `mvn -f`, `gradle -p` or `cd <project>` run leaves the project
-   * folder clean. Disable with SCRIPT_SANDBOX_LOG_REDIRECT=0.
+   * File-log redirect (applied in buildEnv): env var -> file name under
+   * logs/<run_id>/. Spring Boot and Quarkus are built in (env outranks
+   * application.properties/yml there, so the redirect holds no matter which
+   * folder the process runs in); SCRIPT_SANDBOX_LOG_VARS adds any other
+   * language or framework whose log path comes from an environment variable.
+   * A run's own `env` still wins; disable with SCRIPT_SANDBOX_LOG_REDIRECT=0.
    */
   fileLogVars: {
     LOGGING_FILE_NAME: 'application.log', // Spring Boot -> logging.file.name
     QUARKUS_LOG_FILE_PATH: 'quarkus.log', // Quarkus -> quarkus.log.file.path
+    ...logVarsEnv(), // user-defined targets for any other stack
   },
   logRedirect: boolEnv('SCRIPT_SANDBOX_LOG_REDIRECT', true),
   denyEnabled,
