@@ -273,10 +273,35 @@ the official Filesystem MCP server.
 
 ## Publishing
 
+Publishing runs automatically from GitHub Actions
+(`.github/workflows/npm-publish.yml`) using
+[npm Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) —
+no token, no `npm publish` from your machine. Provenance attestations are
+added automatically.
+
 ```bash
-npm version patch
-npm publish          # prepublishOnly runs the full test suite
+npm version patch           # bump version (commit + annotated tag)
+git push origin main --follow-tags
 ```
+
+CI runs the full test suite on `windows-latest` and publishes only when that
+version is not on the registry yet **and** the push changed `package.json`.
+Pushes without a version bump just run the tests; `workflow_dispatch` (Run
+workflow) always tries, which is also the recovery path if a publish needs to
+be repeated.
+
+One-time setup on npmjs.com — **Packages → script-sandbox → Settings →
+Trusted publishing → GitHub Actions**:
+
+| Field | Value |
+|---|---|
+| Organisation or user | `nvafandi` |
+| Repository | `script-sandbox` |
+| Workflow filename | `npm-publish.yml` |
+| Allowed actions | also tick **npm publish** (`npm stage publish` is always allowed) |
+
+The configuration must complete its first publish within **2 days** of being
+created, otherwise it expires and has to be recreated.
 
 Installing on another machine is just `npm install script-sandbox` (see Quick start).
 

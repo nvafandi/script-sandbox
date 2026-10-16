@@ -1,0 +1,93 @@
+# Publish script-sandbox to npm from CI — no local `npm publish` anymore.
+#
+# How it works
+#   Trigger : every push to main + manual run (workflow_dispatch).
+#   Publish : only when the package.json version is NOT on the registry yet
+#             AND the push actually changed package.json (manual runs always
+#             try). Pushes without a version bump only run the tests.
+#   Auth    : npm Trusted Publishing (OIDC) — no token, no repo secret.
+#             One-time setup on npmjs.com:
+#               Packages -> script-sandbox -> Settings -> Trusted publishing
+#               -> GitHub Actions:
+#                 Organisation/user : nvafandi
+#                 Repository        : script-sandbox
+#                 Workflow filename : npm-publish.yml  (exact, incl. .yml)
+#                 Allowed actions   : also tick "npm publish"
+#                                     ("npm stage publish" is always allowed)
+#             Rules: npm CLI >= 11.5.1 + Node >= 22.14 (the workflow installs
+#             the newest npm), and the configuration expires unless the first
+#             publish succeeds within 2 days of creating it.
+#   Provenance: generated automatically by npm for OIDC publishes from a
+#             public GitHub repo — no flag needed.
+#
+# Docs: https://docs.npmjs.com/trusted-publishers
+
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC token for npm trusted publishing
+  contents: read
+
+# Never run two publish jobs at the same time.
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # The test suite runs PowerShell, cmd and Git Bash tools -> Windows runner.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # full history: the "did package.json change?" diff needs the previous push
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false # never use caching in release builds
+
+      - name: Use a recent npm (trusted publishing needs >= 11.5.1)
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test (smoke + config-check + clients-check + compat-check)
+        run: npm test
+
+      - name: Decide what to publish
+        id: decide
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+
+          if npm view "script-sandbox@$version" version >/dev/null 2>&1; then
+            on_registry=true
+          else
+            on_registry=false
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            changed=true
+          elif ! git diff --quiet "${{ github.event.before }}" HEAD -- package.json; then
+            changed=true # also true when the range is unreadable -> fall back to trying
+          else
+            changed=false
+          fi
+
+          {
+            echo "version=$version"
+            echo "on_registry=$on_registry"
+            echo "changed=$changed"
+          } >> "$GITHUB_OUTPUT"
+          echo "script-sandbox@$version | on registry: $on_registry | package.json changed: $changed"
+
+      - name: Publish to npm (OIDC, provenance automatic)
+        if: steps.decide.outputs.on_registry == 'false' && steps.decide.outputs.changed == 'true'
+        run: npm publish
