@@ -271,47 +271,6 @@ without the SDK (old protocol `2024-11-05` and current `2025-03-26`), JSON-only
 stdout, strict JSON Schema tool definitions, argument + annotation parity with
 the official Filesystem MCP server.
 
-## Publishing
-
-Publishing runs automatically from GitHub Actions
-(`.github/workflows/npm-publish.yml`) using
-[npm Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) —
-no token, no `npm publish` from your machine. Provenance attestations are
-added automatically.
-
-- **Pull request → `main`**: the full test suite runs on `windows-latest`
-  (validation only — a PR never publishes).
-- **Merging the PR into `main`**: tests run again, then the new version is
-  published — but only if the head commit belongs to the merged PR, the push
-  changed `package.json`, and that version is not on the registry yet.
-  Direct pushes to `main` run the tests only.
-- **Run workflow** (manual): always tries to publish the current
-  `package.json` version — the escape hatch for versions whose bump did not
-  go through a PR.
-
-```bash
-npm version patch --no-git-tag-version   # bump package.json + package-lock.json
-git commit -am "chore: release x.y.z"    # on the PR branch
-git push                                 # merge the PR -> CI publishes
-# optional bookkeeping after the merge:
-git tag vX.Y.Z && git push origin vX.Y.Z
-```
-
-One-time setup on npmjs.com — **Packages → script-sandbox → Settings →
-Trusted publishing → GitHub Actions**:
-
-| Field | Value |
-|---|---|
-| Organisation or user | `nvafandi` |
-| Repository | `script-sandbox` |
-| Workflow filename | `npm-publish.yml` |
-| Allowed actions | also tick **npm publish** (`npm stage publish` is always allowed) |
-
-The configuration must complete its first publish within **2 days** of being
-created, otherwise it expires and has to be recreated.
-
-Installing on another machine is just `npm install script-sandbox` (see Quick start).
-
 ## License
 
 MIT
