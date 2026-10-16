@@ -371,16 +371,12 @@ const canRun = (kind) => info.interpreters?.[kind]?.available ?? has(kind);
   const sub = tree.payload.tree.find((n) => n.name === 'sub');
   assert.equal(sub?.type, 'directory');
   assert.ok(sub.children.some((c) => c.name === 'findme.js'), 'tree contains the child');
-  const mv = await call('move_file', {
-    source: 'fs/sub/findme.js',
-    // unique per run: a leftover from a previous run would make the target exist
-    destination: `fs/sub/moved-${Date.now()}.js`,
-  });
+  // unique per run: a leftover from a previous run would make the target exist
+  const movedName = `fs/sub/moved-${Date.now()}.js`;
+  const mv = await call('move_file', { source: 'fs/sub/findme.js', destination: movedName });
   assert.ok(mv.payload.moved, 'move_file works');
-  expectCode(
-    await call('move_file', { source: 'fs/sub/moved.js', destination: 'fs/hello.txt' }),
-    'ALREADY_EXISTS',
-  );
+  // moving the file we just moved onto an existing file must be refused
+  expectCode(await call('move_file', { source: movedName, destination: 'fs/hello.txt' }), 'ALREADY_EXISTS');
 
   // read_media_file (an .svg is text media -> base64 round-trip)
   const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>hi</text></svg>';
