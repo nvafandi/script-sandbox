@@ -158,6 +158,11 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "publish=$publish"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "reason=$reason"
           Write-Host "script-sandbox@$version | on registry: $onRegistry | publish: $publish ($reason)"
+          # Explicit exit: the runner's pwsh wrapper ends with
+          # `exit $LASTEXITCODE`, so without this the step would exit with the
+          # last native command's code — npm view's 404 (= version not on the
+          # registry, the normal case) fails the whole job otherwise.
+          exit 0
 
       - name: Publish to npm (OIDC, provenance automatic)
         if: steps.decide.outputs.publish == 'true' && steps.decide.outputs.on_registry == 'false'
