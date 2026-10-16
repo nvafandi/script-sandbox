@@ -10,6 +10,10 @@
 #                          - that version is not on the registry yet.
 #   workflow_dispatch  : manual escape hatch ("Run workflow"); always tries —
 #                        e.g. for a version whose bump did not go through a PR.
+#   Tagging            : after a successful publish the publish job pushes a
+#                        lightweight v<version> tag to the commit it published
+#                        from, so no release can reach npm without a matching
+#                        git tag. An already-existing tag is left untouched.
 #   Auth : npm Trusted Publishing (OIDC) — no token, no repo secret.
 #     One-time setup on npmjs.com:
 #       Packages -> script-sandbox -> Settings -> Trusted publishing
@@ -120,6 +124,12 @@ jobs:
     # unmerged code must never be published.
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
+    # Job-level permissions REPLACE the workflow-level set, so id-token has to
+    # be restated here: id-token for the npm OIDC exchange, contents: write only
+    # so this job can push the release tag (nothing else needs write access).
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -198,6 +208,7 @@ jobs:
           exit 0
 
       - name: Publish to npm (OIDC, provenance automatic)
+        id: publish
         if: steps.decide.outputs.publish == 'true' && steps.decide.outputs.on_registry == 'false'
         # cmd does the redirection as plain text (no PowerShell stream quirks);
         # on failure the tail of the output is published as an annotation so the
@@ -213,3 +224,34 @@ jobs:
             Write-Output "::error::npm publish failed (exit $code) - last lines: %0A$msg"
           }
           exit $code
+
+      - name: Tag the release on GitHub
+        # Only after an actual, successful publish: a version must never reach
+        # npm without a matching v<version> tag. Idempotent — a tag that already
+        # exists (manual tagging, or a re-run) is left alone.
+        if: steps.publish.outcome == 'success'
+        run: |
+          $version = node -p "require('./package.json').version"
+          if (-not $version) {
+            Write-Output "::error::could not read the version from package.json"
+            exit 1
+          }
+          $tag = "v$version"
+          git rev-parse --verify "refs/tags/$tag" > $null 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Tag $tag already exists - nothing to do."
+            exit 0
+          }
+          git tag $tag
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error::failed to create tag $tag"
+            exit 1
+          }
+          # GITHUB_TOKEN pushes do not start new workflow runs, and the trigger
+          # only matches branch pushes anyway -> no loop.
+          git push origin $tag
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error::failed to push tag $tag"
+            exit 1
+          }
+          Write-Host "Tagged $tag at $env:GITHUB_SHA"
