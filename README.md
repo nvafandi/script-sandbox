@@ -92,13 +92,6 @@ you added yourself (e.g. `disabled`, `autoApprove`) are preserved on update.
 
 ### Filesystem tools
 
-Ported from the official
-[Filesystem MCP server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem),
-but restricted to the allowed directories — see
-`list_allowed_directories`: the sandbox root plus anything listed in
-`SCRIPT_SANDBOX_FS_ROOTS`. Paths outside (via `..` or a symlink) are refused
-with code `PATH_ESCAPE`.
-
 | Tool | Function |
 |---|---|
 | `list_allowed_directories` | Directories the file tools may read/write |
@@ -114,12 +107,6 @@ with code `PATH_ESCAPE`.
 | `search_files` | Recursive glob search: `*.js`, `src/**/*.ts` (+ `excludePatterns`) |
 | `directory_tree` | Recursive JSON tree (symlinks listed, never followed) |
 | `get_file_info` | Size, created/modified/accessed times, type, permissions |
-
-Every tool carries MCP annotations (`readOnlyHint`, `idempotentHint`,
-`destructiveHint`, `openWorldHint`) with the same mapping the official server
-documents, so clients that auto-approve read-only tools treat both servers
-identically. The `run_*` tools are marked open-world: native code can reach the
-network.
 
 ## Supported languages
 
