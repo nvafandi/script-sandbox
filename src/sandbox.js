@@ -722,6 +722,7 @@ export async function sandboxInfo() {
     scripts_dir: config.dirs.scripts,
     work_dir: config.dirs.work,
     logs_dir: config.dirs.logs,
+    fs_allowed_directories: config.fsRoots,
     extensions: config.extensions,
     interpreters: interpretersInfo,
     languages: config.interpreters.map((i) => ({
@@ -737,6 +738,8 @@ export async function sandboxInfo() {
       max_output_bytes: config.maxOutputBytes,
       max_concurrent: config.maxConcurrent,
       max_script_bytes: config.maxScriptBytes,
+      max_write_bytes: config.fsMaxWriteBytes,
+      max_media_bytes: config.fsMaxMediaBytes,
       keep_runs: config.keepRuns,
     },
     guardrails: {

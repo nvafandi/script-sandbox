@@ -37,17 +37,30 @@ const expectCode = (res, code) =>
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
+    'create_directory',
     'delete_script',
+    'directory_tree',
+    'edit_file',
+    'get_file_info',
+    'list_allowed_directories',
+    'list_directory',
+    'list_directory_with_sizes',
     'list_scripts',
+    'move_file',
     'read_log',
+    'read_media_file',
+    'read_multiple_files',
     'read_script',
+    'read_text_file',
     'run_code',
     'run_executable',
     'run_script',
     'sandbox_info',
+    'search_files',
+    'write_file',
     'write_script',
   ]);
-  console.log('  PASS  9 tools registered');
+  console.log('  PASS  22 tools registered');
 }
 
 /* 2. sandbox_info */
@@ -266,6 +279,95 @@ const canRun = (kind) => info.interpreters?.[kind]?.available ?? has(kind);
   expectCode(await call('run_executable', { executable: 'node', args: ['-e', 'rm -rf /'] }), 'DENIED');
   expectCode(await call('run_executable', { executable: 'nonexistent-xyz' }), 'NOT_FOUND');
   console.log('  PASS  run_executable + guardrail args');
+}
+
+/* 13. filesystem tools: allowed directories + full CRUD flow */
+{
+  // allowed directories = sandbox root first (+ SCRIPT_SANDBOX_FS_ROOTS)
+  const allowed = await call('list_allowed_directories');
+  assert.ok(!allowed.isError);
+  assert.equal(allowed.payload.directories[0], info.root, 'first allowed dir = sandbox root');
+  assert.ok(info.fs_allowed_directories?.includes(info.root), 'sandbox_info exposes fs roots');
+
+  // write -> read -> head -> get_file_info -> list
+  const w = await call('write_file', { path: 'fs/hello.txt', content: 'hello-fs\nsecond\n', overwrite: true });
+  assert.ok(!w.isError, `write_file: ${JSON.stringify(w.payload)}`);
+  const r = await call('read_text_file', { path: 'fs/hello.txt' });
+  assert.ok(r.payload.content.includes('hello-fs'));
+  const head = await call('read_text_file', { path: 'fs/hello.txt', head: 1 });
+  assert.equal(head.payload.lines_returned, 1, 'head=1 returns one line');
+  assert.ok(!head.payload.content.includes('second'));
+  expectCode(await call('read_text_file', { path: 'fs/hello.txt', head: 1, tail: 1 }), 'INVALID_INPUT');
+
+  const meta = await call('get_file_info', { path: 'fs/hello.txt' });
+  assert.equal(meta.payload.type, 'file');
+  assert.ok(meta.payload.size_bytes > 0);
+  assert.equal(meta.payload.permissions.octal.length, 3);
+
+  const list = await call('list_directory', { path: 'fs' });
+  assert.ok(list.payload.entries.some((e) => e.name === 'hello.txt' && e.type === 'file'));
+  const sizes = await call('list_directory_with_sizes', { path: 'fs', sortBy: 'size' });
+  assert.ok(sizes.payload.summary.total_files >= 1, 'summary counts the files');
+  assert.equal(
+    sizes.payload.summary.total_files + sizes.payload.summary.total_directories,
+    sizes.payload.entries.length,
+    'summary adds up to the entry list',
+  );
+
+  // overwrite guard + partial batch failure
+  expectCode(await call('write_file', { path: 'fs/hello.txt', content: 'x' }), 'ALREADY_EXISTS');
+  const multi = await call('read_multiple_files', { paths: ['fs/hello.txt', 'fs/missing.txt'] });
+  assert.equal(multi.payload.failed, 1, 'one bad path does not stop the batch');
+  assert.ok(multi.payload.files[0].ok && !multi.payload.files[1].ok);
+
+  // edit_file: dry run previews without writing, then apply
+  const edits = [{ oldText: 'second', newText: 'SECOND' }];
+  const dry = await call('edit_file', { path: 'fs/hello.txt', edits, dryRun: true });
+  assert.ok(!dry.isError && dry.payload.dry_run && dry.payload.changed && !dry.payload.written);
+  assert.ok(dry.payload.diff.includes('-second') && dry.payload.diff.includes('+SECOND'), 'diff shown');
+  const untouched = await call('read_text_file', { path: 'fs/hello.txt' });
+  assert.ok(untouched.payload.content.includes('second'), 'dry run did not write');
+  const applied = await call('edit_file', { path: 'fs/hello.txt', edits });
+  assert.ok(applied.payload.written && applied.payload.diff.includes('+SECOND'));
+  const afterEdit = await call('read_text_file', { path: 'fs/hello.txt' });
+  assert.ok(afterEdit.payload.content.includes('SECOND'), 'edit applied');
+  expectCode(
+    await call('edit_file', { path: 'fs/hello.txt', edits: [{ oldText: 'nope-nope', newText: 'x' }] }),
+    'NOT_FOUND',
+  );
+
+  // create dir -> search -> tree -> move
+  await call('create_directory', { path: 'fs/sub' });
+  await call('write_file', { path: 'fs/sub/findme.js', content: 'x\n' });
+  const found = await call('search_files', { path: 'fs', pattern: '*.js' });
+  assert.ok(found.payload.matches.some((m) => m.endsWith('findme.js')), 'glob search finds the file');
+  const tree = await call('directory_tree', { path: 'fs' });
+  const sub = tree.payload.tree.find((n) => n.name === 'sub');
+  assert.equal(sub?.type, 'directory');
+  assert.ok(sub.children.some((c) => c.name === 'findme.js'), 'tree contains the child');
+  const mv = await call('move_file', {
+    source: 'fs/sub/findme.js',
+    // unique per run: a leftover from a previous run would make the target exist
+    destination: `fs/sub/moved-${Date.now()}.js`,
+  });
+  assert.ok(mv.payload.moved, 'move_file works');
+  expectCode(
+    await call('move_file', { source: 'fs/sub/moved.js', destination: 'fs/hello.txt' }),
+    'ALREADY_EXISTS',
+  );
+
+  // read_media_file (an .svg is text media -> base64 round-trip)
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>hi</text></svg>';
+  await call('write_file', { path: 'fs/img.svg', content: svg, overwrite: true });
+  const media = await call('read_media_file', { path: 'fs/img.svg' });
+  assert.equal(media.payload.mime_type, 'image/svg+xml');
+  assert.equal(Buffer.from(media.payload.data, 'base64').toString('utf8'), svg, 'base64 round-trip');
+
+  // access control: outside every allowed directory is refused
+  expectCode(await call('read_text_file', { path: 'C:/Windows/win.ini' }), 'PATH_ESCAPE');
+  expectCode(await call('read_text_file', { path: '../../../escape.txt' }), 'PATH_ESCAPE');
+  expectCode(await call('write_file', { path: '../../escape.txt', content: 'x' }), 'PATH_ESCAPE');
+  console.log('  PASS  filesystem tools + access control');
 }
 
 await client.close();

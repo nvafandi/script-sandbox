@@ -9,6 +9,8 @@
  * - timeout + kill of the whole process tree
  * - stdout/stderr log + result.json per run, output truncated for the caller
  * - path guard (anti traversal/symlink escape) + per-language guardrails
+ * Plus filesystem tools (read/write/edit/list/search/tree/move) restricted to
+ * the allowed directories: sandbox root + SCRIPT_SANDBOX_FS_ROOTS (see files.js).
  *
  * NOTE: this is lightweight isolation, not a security boundary. Native executables
  * in particular cannot be contained by a soft sandbox — never run anything untrusted
@@ -21,6 +23,21 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import config from './config.js';
+import {
+  createDirectory,
+  directoryTree,
+  editFile,
+  getFileInfo,
+  listAllowedDirectories,
+  listDirectory,
+  listDirectoryWithSizes,
+  moveFile,
+  readMediaFile,
+  readMultipleFiles,
+  readTextFile,
+  searchFiles,
+  writeFile,
+} from './files.js';
 import {
   SandboxError,
   deleteScript,
@@ -49,7 +66,10 @@ const server = new McpServer(
       'or run_code for short code snippets; or run_executable for binaries/CLI tools. ' +
       'The interpreter is chosen automatically from the file extension (.ps1, .sh, .py, .js, .rb, .pl, .lua, .php, ' +
       '.r, .java, .bat, .vbs — see sandbox_info for what is installed on this device). All script paths are ' +
-      'relative to the scripts/ folder inside the sandbox; paths outside the sandbox are rejected.',
+      'relative to the scripts/ folder inside the sandbox; paths outside the sandbox are rejected. ' +
+      'Filesystem tools (read_text_file, write_file, edit_file, list_directory, search_files, directory_tree, ...) ' +
+      'operate only inside the allowed directories — the sandbox root plus SCRIPT_SANDBOX_FS_ROOTS; ' +
+      'call list_allowed_directories to see them.',
   },
 );
 
@@ -85,6 +105,51 @@ function wrap(handler) {
   };
 }
 
+/**
+ * MCP ToolAnnotations — the same hint semantics the official Filesystem server
+ * sends, so clients (Cline, Roo, Copilot, Claude, ...) can auto-approve
+ * read-only tools and warn before destructive ones. idempotent/destructive are
+ * only meaningful for write tools (per spec), hence absent on read-only ones.
+ * openWorldHint=false = stays inside the local filesystem/sandbox; the run_*
+ * tools execute native code that CAN reach the network, so they are
+ * open-world, never read-only, never idempotent.
+ */
+const TOOL_ANNOTATIONS = {
+  // script tools
+  sandbox_info: { readOnlyHint: true, openWorldHint: false },
+  list_scripts: { readOnlyHint: true, openWorldHint: false },
+  read_script: { readOnlyHint: true, openWorldHint: false },
+  read_log: { readOnlyHint: true, openWorldHint: false },
+  write_script: { readOnlyHint: false, idempotentHint: true, destructiveHint: true, openWorldHint: false },
+  delete_script: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false },
+  run_script: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true },
+  run_code: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true },
+  run_executable: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true },
+  // filesystem tools — mapping copied from the official server's docs
+  list_allowed_directories: { readOnlyHint: true, openWorldHint: false },
+  read_text_file: { readOnlyHint: true, openWorldHint: false },
+  read_multiple_files: { readOnlyHint: true, openWorldHint: false },
+  read_media_file: { readOnlyHint: true, openWorldHint: false },
+  write_file: { readOnlyHint: false, idempotentHint: true, destructiveHint: true, openWorldHint: false },
+  edit_file: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false },
+  create_directory: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+  move_file: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false },
+  list_directory: { readOnlyHint: true, openWorldHint: false },
+  list_directory_with_sizes: { readOnlyHint: true, openWorldHint: false },
+  search_files: { readOnlyHint: true, openWorldHint: false },
+  directory_tree: { readOnlyHint: true, openWorldHint: false },
+  get_file_info: { readOnlyHint: true, openWorldHint: false },
+};
+
+/** registerTool + required annotations — a tool without an entry fails fast at startup. */
+function register(name, config, handler) {
+  const annotations = TOOL_ANNOTATIONS[name];
+  if (!annotations) {
+    throw new Error(`Missing TOOL_ANNOTATIONS entry for tool "${name}"`);
+  }
+  server.registerTool(name, { ...config, annotations }, handler);
+}
+
 const timeoutSchema = z
   .number()
   .int()
@@ -105,7 +170,8 @@ const argsSchema = z
 
 /* ------------------------------------------------------------ sandbox_info */
 
-server.registerTool(
+
+register(
   'sandbox_info',
   {
     title: 'Sandbox info',
@@ -119,7 +185,8 @@ server.registerTool(
 
 /* ------------------------------------------------------------ list_scripts */
 
-server.registerTool(
+
+register(
   'list_scripts',
   {
     title: 'List scripts',
@@ -133,7 +200,8 @@ server.registerTool(
 
 /* ------------------------------------------------------------ write_script */
 
-server.registerTool(
+
+register(
   'write_script',
   {
     title: 'Write script',
@@ -156,7 +224,8 @@ server.registerTool(
 
 /* ------------------------------------------------------------- read_script */
 
-server.registerTool(
+
+register(
   'read_script',
   {
     title: 'Read script',
@@ -170,7 +239,8 @@ server.registerTool(
 
 /* ----------------------------------------------------------- delete_script */
 
-server.registerTool(
+
+register(
   'delete_script',
   {
     title: 'Delete script',
@@ -184,7 +254,8 @@ server.registerTool(
 
 /* -------------------------------------------------------------- run_script */
 
-server.registerTool(
+
+register(
   'run_script',
   {
     title: 'Run script',
@@ -206,7 +277,8 @@ server.registerTool(
 
 /* ---------------------------------------------------------------- run_code */
 
-server.registerTool(
+
+register(
   'run_code',
   {
     title: 'Run inline code',
@@ -234,7 +306,8 @@ server.registerTool(
 
 /* --------------------------------------------------------- run_executable */
 
-server.registerTool(
+
+register(
   'run_executable',
   {
     title: 'Run executable',
@@ -258,7 +331,8 @@ server.registerTool(
 
 /* ---------------------------------------------------------------- read_log */
 
-server.registerTool(
+
+register(
   'read_log',
   {
     title: 'Read run log',
@@ -270,6 +344,239 @@ server.registerTool(
     },
   },
   wrap(async ({ run_id, which }) => ok({ ok: true, ...(await readLog(run_id, which || 'stdout')) })),
+);
+
+/* ------------------------------------------------- filesystem tool schemas */
+
+const fsPathSchema = z
+  .string()
+  .describe(
+    'Absolute path inside an allowed directory, or a path relative to the sandbox root.',
+  );
+
+const excludePatternsSchema = z
+  .array(z.string())
+  .optional()
+  .describe('Globs to skip, e.g. ["node_modules", "**/*.tmp"].');
+
+/* ------------------------------------------------- filesystem: allowed dirs */
+
+
+register(
+  'list_allowed_directories',
+  {
+    title: 'List allowed directories',
+    description:
+      'Lists every directory the filesystem tools may read/write: the sandbox root ' +
+      'plus anything in SCRIPT_SANDBOX_FS_ROOTS. Paths outside these are refused.',
+    inputSchema: {},
+  },
+  wrap(async () => ok(listAllowedDirectories())),
+);
+
+/* ------------------------------------------------------- filesystem: read */
+
+
+register(
+  'read_text_file',
+  {
+    title: 'Read text file',
+    description:
+      'Reads a UTF-8 text file inside an allowed directory. Optionally return only the ' +
+      'first (head) or last (tail) N lines — head and tail cannot be combined.',
+    inputSchema: {
+      path: fsPathSchema,
+      head: z.number().int().positive().optional().describe('First N lines of the file.'),
+      tail: z.number().int().positive().optional().describe('Last N lines of the file.'),
+    },
+  },
+  wrap(async (args) => ok(await readTextFile(args))),
+);
+
+
+register(
+  'read_multiple_files',
+  {
+    title: 'Read multiple files',
+    description:
+      'Reads several UTF-8 text files in one call. A failing path does not stop the batch: ' +
+      'the failure is reported per file (ok=false + code).',
+    inputSchema: {
+      paths: z.array(z.string()).min(1).describe('Files to read (max 50).'),
+    },
+  },
+  wrap(async (args) => ok(await readMultipleFiles(args))),
+);
+
+
+register(
+  'read_media_file',
+  {
+    title: 'Read media file',
+    description:
+      'Reads an image/audio/video/PDF file and returns it base64-encoded with its MIME type. ' +
+      'Size cap: SCRIPT_SANDBOX_FS_MAX_MEDIA_BYTES (default 5 MB).',
+    inputSchema: {
+      path: fsPathSchema,
+    },
+  },
+  wrap(async (args) => ok(await readMediaFile(args))),
+);
+
+/* ---------------------------------------------------- filesystem: write */
+
+
+register(
+  'write_file',
+  {
+    title: 'Write file',
+    description:
+      'Creates a file (parents are created automatically) inside an allowed directory. ' +
+      'An existing file is only replaced with overwrite=true. Size cap: ' +
+      'SCRIPT_SANDBOX_FS_MAX_WRITE_BYTES (default 1 MB).',
+    inputSchema: {
+      path: fsPathSchema,
+      content: z.string().describe('File content (UTF-8).'),
+      overwrite: z.boolean().optional().describe('Set true to replace an existing file.'),
+    },
+  },
+  wrap(async (args) => ok(await writeFile(args))),
+);
+
+
+register(
+  'edit_file',
+  {
+    title: 'Edit file',
+    description:
+      'Makes selective edits with git-style diff output. Each edit replaces a unique oldText ' +
+      'with newText (substring match; when only whitespace differs, indentation is carried ' +
+      'over line by line). Ambiguous or missing patterns are refused with a clear code. ' +
+      'Always dry_run=true first to preview the diff before applying.',
+    inputSchema: {
+      path: fsPathSchema,
+      edits: z
+        .array(
+          z.object({
+            oldText: z.string().describe('Text to find (must match exactly once).'),
+            newText: z.string().describe('Replacement text.'),
+          }),
+        )
+        .min(1)
+        .describe('Edits applied in order (max 50).'),
+      dryRun: z.boolean().optional().describe('Preview the diff without writing (default false).'),
+    },
+  },
+  wrap(async (args) => ok(await editFile(args))),
+);
+
+
+register(
+  'create_directory',
+  {
+    title: 'Create directory',
+    description: 'Creates a directory (and its parents) inside an allowed directory.',
+    inputSchema: {
+      path: fsPathSchema,
+    },
+  },
+  wrap(async (args) => ok(await createDirectory(args))),
+);
+
+
+register(
+  'move_file',
+  {
+    title: 'Move file or directory',
+    description:
+      'Moves or renames a file/directory inside the allowed directories. Fails with ' +
+      'ALREADY_EXISTS if the destination exists.',
+    inputSchema: {
+      source: fsPathSchema,
+      destination: fsPathSchema,
+    },
+  },
+  wrap(async (args) => ok(await moveFile(args))),
+);
+
+/* ------------------------------------------------- filesystem: list/search */
+
+
+register(
+  'list_directory',
+  {
+    title: 'List directory',
+    description: 'Lists a directory: every entry with its type (file or directory).',
+    inputSchema: {
+      path: fsPathSchema,
+    },
+  },
+  wrap(async (args) => ok(await listDirectory(args))),
+);
+
+
+register(
+  'list_directory_with_sizes',
+  {
+    title: 'List directory with sizes',
+    description:
+      'Lists a directory with file sizes, modification times and a summary ' +
+      '(total files/directories/bytes); entries sorted by name or size.',
+    inputSchema: {
+      path: fsPathSchema,
+      sortBy: z.enum(['name', 'size']).optional().describe('Default: name.'),
+    },
+  },
+  wrap(async (args) => ok(await listDirectoryWithSizes(args))),
+);
+
+
+register(
+  'search_files',
+  {
+    title: 'Search files',
+    description:
+      'Recursively searches a directory for files/directories matching a glob pattern ' +
+      '(e.g. "*.js", "src/**/*.ts"). A pattern without "/" matches names at any depth. ' +
+      'Returns full paths, up to 500 matches.',
+    inputSchema: {
+      path: fsPathSchema,
+      pattern: z.string().describe('Glob pattern, e.g. "*.py" or "src/**/*.ts".'),
+      excludePatterns: excludePatternsSchema,
+    },
+  },
+  wrap(async (args) => ok(await searchFiles(args))),
+);
+
+
+register(
+  'directory_tree',
+  {
+    title: 'Directory tree',
+    description:
+      'Recursive JSON tree of a directory: name/type per entry, children for directories ' +
+      '(empty array when empty). Symlinks are listed but never followed.',
+    inputSchema: {
+      path: fsPathSchema,
+      excludePatterns: excludePatternsSchema,
+    },
+  },
+  wrap(async (args) => ok(await directoryTree(args))),
+);
+
+
+register(
+  'get_file_info',
+  {
+    title: 'Get file info',
+    description:
+      'File/directory metadata: size, created/modified/accessed times, type, permissions ' +
+      '(octal + rwx) and whether it is a symlink.',
+    inputSchema: {
+      path: fsPathSchema,
+    },
+  },
+  wrap(async (args) => ok(await getFileInfo(args))),
 );
 
 /* ------------------------------------------------------------------- start */

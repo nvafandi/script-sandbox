@@ -58,12 +58,31 @@ function listEnv(name) {
     .filter(Boolean);
 }
 
+/** Comma-separated list of paths (kept as-is: case and separators matter). */
+function pathListEnv(name) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return [];
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => path.resolve(item));
+}
+
 const IS_WINDOWS = process.platform === 'win32';
 
 /** Sandbox root: always in the OS temp folder of the device (portable). */
 const root = path.resolve(
   process.env.SCRIPT_SANDBOX_ROOT || path.join(os.tmpdir(), 'opencode', 'script-sandbox'),
 );
+
+/**
+ * Directories the filesystem tools (read_text_file, write_file, ...) may touch.
+ * Default: the sandbox root only. Extend with comma-separated absolute paths:
+ *   SCRIPT_SANDBOX_FS_ROOTS="D:/data,D:/notes"
+ * (the sandbox root is always included; symlinks pointing out of a root are refused)
+ */
+const fsRoots = [...new Set([root, ...pathListEnv('SCRIPT_SANDBOX_FS_ROOTS')])];
 
 /**
  * Find the first executable on PATH. On Windows candidates are checked with
@@ -496,6 +515,12 @@ export const config = {
     work: path.join(root, 'work'),
     logs: path.join(root, 'logs'),
   },
+  /** Allowed directories for the filesystem tools (sandbox root + SCRIPT_SANDBOX_FS_ROOTS). */
+  fsRoots,
+  /** Byte cap for write_file content. */
+  fsMaxWriteBytes: intEnv('SCRIPT_SANDBOX_FS_MAX_WRITE_BYTES', 1_000_000),
+  /** Byte cap for read_media_file (base64 payloads grow by ~4/3). */
+  fsMaxMediaBytes: intEnv('SCRIPT_SANDBOX_FS_MAX_MEDIA_BYTES', 5_000_000),
   interpreters,
   extensions,
   shells,

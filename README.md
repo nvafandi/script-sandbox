@@ -4,6 +4,11 @@ MCP server (stdio) for running **any script** (PowerShell, bash, Python, Node.js
 Ruby, Perl, Lua, PHP, R, Java, batch, VBScript) and **any executable** inside a
 lightweight sandbox — without polluting your main working directory.
 
+It also ships the core tools of the official
+[Filesystem MCP server](https://mcpservers.org/servers/modelcontextprotocol/filesystem)
+(read/write/edit/list/search/tree/move), restricted to a configurable set of
+allowed directories instead of the whole disk.
+
 The engine is registry-driven: the interpreter is chosen automatically from the
 file extension, so adding a language means adding a registry entry, not new
 engine code. Interpreters are resolved from your machine's `PATH` at startup.
@@ -76,6 +81,8 @@ you added yourself (e.g. `disabled`, `autoApprove`) are preserved on update.
 
 ## Tools
 
+### Script tools
+
 | Tool | Function |
 |---|---|
 | `sandbox_info` | Languages + interpreters available on this machine (with versions), limits, guardrails |
@@ -87,6 +94,37 @@ you added yourself (e.g. `disabled`, `autoApprove`) are preserved on update.
 | `run_code` | Run inline code (pick `language`); the temp file is removed afterwards |
 | `run_executable` | Run any executable (name on `PATH` or absolute path) |
 | `read_log` | Read the full stdout/stderr log of a run |
+
+### Filesystem tools
+
+Ported from the official
+[Filesystem MCP server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem),
+but restricted to the allowed directories — see
+`list_allowed_directories`: the sandbox root plus anything listed in
+`SCRIPT_SANDBOX_FS_ROOTS`. Paths outside (via `..` or a symlink) are refused
+with code `PATH_ESCAPE`.
+
+| Tool | Function |
+|---|---|
+| `list_allowed_directories` | Directories the file tools may read/write |
+| `read_text_file` | Read a UTF-8 file (optional `head`/`tail` line selection) |
+| `read_multiple_files` | Read up to 50 files in one call; failures reported per file |
+| `read_media_file` | Image/audio/video/PDF as base64 + MIME type (5 MB cap) |
+| `write_file` | Create a file (parents included); `overwrite=true` to replace (1 MB cap) |
+| `edit_file` | Selective edits with git-style diff output; `dryRun` previews first |
+| `create_directory` | Create a directory (parents included) |
+| `list_directory` | Directory entries with type (file/directory) |
+| `list_directory_with_sizes` | Entries + sizes + summary; sort by `name` or `size` |
+| `move_file` | Move/rename a file or directory; destination must be free |
+| `search_files` | Recursive glob search: `*.js`, `src/**/*.ts` (+ `excludePatterns`) |
+| `directory_tree` | Recursive JSON tree (symlinks listed, never followed) |
+| `get_file_info` | Size, created/modified/accessed times, type, permissions |
+
+Every tool carries MCP annotations (`readOnlyHint`, `idempotentHint`,
+`destructiveHint`, `openWorldHint`) with the same mapping the official server
+documents, so clients that auto-approve read-only tools treat both servers
+identically. The `run_*` tools are marked open-world: native code can reach the
+network.
 
 ## Supported languages
 
@@ -132,6 +170,8 @@ class Main {
 - Child process env limited to an allowlist; `TEMP`/`TMP` redirected into the sandbox
 - Timeout + full process-tree kill; capped output; per-run logs
 - Script paths must be relative (anti path-traversal / symlink escape)
+- Filesystem tools only touch allowed directories (sandbox root +
+  `SCRIPT_SANDBOX_FS_ROOTS`): traversal and symlink escapes are refused
 - Per-language guardrails against destructive patterns (`Format-Volume`,
   `rm -rf /`, `mkfs`, `shutil.rmtree('/')`, ...). Disable globally with
   `SCRIPT_SANDBOX_DENY=0` or per language with `SCRIPT_SANDBOX_DENY_OFF=sh,python`
@@ -155,6 +195,9 @@ class Main {
 | `SCRIPT_SANDBOX_KEEP_RUNS` | `50` | Number of runs kept on disk |
 | `SCRIPT_SANDBOX_MAX_SCRIPT_BYTES` | `1000000` | Max script size |
 | `SCRIPT_SANDBOX_EXTENSIONS` | (all) | Restrict allowed extensions |
+| `SCRIPT_SANDBOX_FS_ROOTS` | (empty) | Extra allowed directories for the filesystem tools, comma-separated: `D:/data,/home/me/notes` |
+| `SCRIPT_SANDBOX_FS_MAX_WRITE_BYTES` | `1000000` | `write_file` content cap |
+| `SCRIPT_SANDBOX_FS_MAX_MEDIA_BYTES` | `5000000` | `read_media_file` size cap |
 | `SCRIPT_SANDBOX_DENY` | `1` | Guardrails on/off |
 | `SCRIPT_SANDBOX_DENY_OFF` | (empty) | Disable guardrails per language kind: `sh,python` |
 | `SCRIPT_SANDBOX_SHELL_<KIND>` | (auto) | Pin an interpreter: `SCRIPT_SANDBOX_SHELL_NODE=D:/node/node.exe` |
@@ -165,28 +208,42 @@ class Main {
 1. Write a script : write_script { name: "build/check.py", content: "..." }
 2. Run it         : run_script   { script: "build/check.py", timeout_ms: 60000 }
 3. Read the result: exit_code / stdout / stderr are in the run result
-4. Full log (opt.) : read_log { run_id: "...", which: "stderr" }
+4. Full log (opt.): read_log { run_id: "...", which: "stderr" }
 
 One-shot code : run_code   { code: "print(6*7)", language: "py" }
 A binary/CLI  : run_executable { executable: "git", args: ["--version"] }
+
+File ops (allowed dirs only):
+  read_text_file      { path: "notes/todo.txt", tail: 20 }
+  write_file          { path: "notes/todo.txt", content: "...", overwrite: true }
+  edit_file           { path: "notes/todo.txt", edits: [{oldText: "a", newText: "b"}], dryRun: true }
+  search_files        { path: ".", pattern: "*.md", excludePatterns: ["node_modules"] }
+  list_allowed_directories { }         # what the file tools may touch
 ```
 
 ## Project layout
 
-- `src/server.js` — MCP stdio server, 9 tools
+- `src/server.js` — MCP stdio server, 22 tools
 - `src/config.js` — interpreter registry + guardrails + limits (all overridable via `SCRIPT_SANDBOX_*` env)
 - `src/sandbox.js` — execution engine (per-run cwd, env allowlist, timeout, logs)
+- `src/files.js` — filesystem tools, restricted to the allowed directories
 - `scripts/` — npm installer + multi-client registrar
-- `test/` — smoke test, config-check, clients-check
+- `test/` — smoke test, config-check, clients-check, compat-check
 
 ## Testing
 
 ```bash
-npm test    # smoke (MCP + every tool) + config-check + clients-check
+npm test    # smoke (MCP + every tool) + config-check + clients-check + compat-check
 ```
 
 The smoke test follows the interpreters available on the machine: languages
 that are not installed are skipped automatically.
+
+The compat check proves other MCP clients / AI providers can use the server:
+paste-ready config blocks for all 10 supported clients, a raw stdio session
+without the SDK (old protocol `2024-11-05` and current `2025-03-26`), JSON-only
+stdout, strict JSON Schema tool definitions, argument + annotation parity with
+the official Filesystem MCP server.
 
 ## Publishing
 

@@ -44,7 +44,7 @@ if (configPath) {
   await client.connect(transport);
   const { tools } = await client.listTools();
   console.log(`handshake ok in ${Date.now() - t0}ms, tools=${tools.length}`);
-  assert.equal(tools.length, 9, 'expected 9 tools');
+  assert.equal(tools.length, 22, 'expected 22 tools');
 
   const res = await client.callTool({
     name: 'run_code',
@@ -69,6 +69,10 @@ assert.ok(config.dirs.root.startsWith(path.resolve(os.tmpdir())), 'root in the O
 assert.ok(config.dirs.root.includes('script-sandbox'), 'folder name = script-sandbox');
 assert.ok(config.extensions.length >= 4, 'at least .ps1/.sh/.py/.js registered');
 assert.ok(config.shells['.ps1'] && config.shells['.js'] && config.shells['.py'], 'per-extension registry present');
+// Filesystem tools: the sandbox root is always the first allowed directory.
+assert.ok(config.fsRoots.length >= 1, 'at least one allowed directory for the fs tools');
+assert.equal(config.fsRoots[0], config.dirs.root, 'first allowed directory = sandbox root');
+assert.ok(config.fsMaxWriteBytes > 0 && config.fsMaxMediaBytes > 0, 'fs size caps configured');
 
 console.log('root     :', config.dirs.root);
 console.log('extensions:', config.extensions.join(', '));

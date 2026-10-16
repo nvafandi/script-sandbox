@@ -1,7 +1,7 @@
 {
   "name": "script-sandbox",
   "version": "1.1.0",
-  "description": "MCP server (stdio) to run any script (PowerShell, bash, Python, Node, Ruby, Perl, Lua, PHP, R, Java, batch, VBScript) and any executable inside a lightweight sandbox: per-run working dir, minimal env, timeout, logs, and per-language guardrails.",
+  "description": "MCP server (stdio) to run any script (PowerShell, bash, Python, Node, Ruby, Perl, Lua, PHP, R, Java, batch, VBScript) and any executable inside a lightweight sandbox: per-run working dir, minimal env, timeout, logs, and per-language guardrails. Plus filesystem tools (read/write/edit/search/tree) restricted to allowed directories.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -17,7 +17,9 @@
     "php",
     "java",
     "stdio",
-    "ai-agent"
+    "ai-agent",
+    "filesystem",
+    "file-operations"
   ],
   "homepage": "https://github.com/nvafandi/script-sandbox",
   "bugs": {
@@ -45,7 +47,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/smoke.js && node test/config-check.mjs && node test/clients-check.mjs",
+    "test": "node test/smoke.js && node test/config-check.mjs && node test/clients-check.mjs && node test/compat-check.mjs",
     "setup:npm": "node scripts/setup-npm.js",
     "setup:clients": "node scripts/setup-clients.js",
     "prepublishOnly": "npm test"

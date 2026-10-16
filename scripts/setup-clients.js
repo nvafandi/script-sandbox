@@ -482,7 +482,7 @@ function main() {
   if (!dryRun && changed > 0) {
     console.log('Restart the affected clients so the config is re-read.');
   }
-  console.log('Verify per client: check that its MCP panel shows "script-sandbox" with 9 tools.');
+  console.log('Verify per client: check that its MCP panel shows "script-sandbox" with 22 tools.');
 }
 
 try {
