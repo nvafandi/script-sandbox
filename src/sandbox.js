@@ -309,6 +309,17 @@ function buildEnv(runId, runDir, extra) {
   if (env.PSModulePath) {
     env.PSModulePath = `${env.PSModulePath}${path.delimiter}${path.join(runDir, 'modules')}`;
   }
+  // Framework file logs (Spring Boot, Quarkus): point them at this run's log
+  // folder. Env outranks application.properties/yml in both frameworks, so the
+  // redirect holds even when a `mvn -f`, `gradle -p` or `cd <project>` run makes
+  // the project folder the base of relative log paths — the project stays clean.
+  // Callers can still override per run: `extra` is merged after this block.
+  if (config.logRedirect) {
+    const runLogDir = path.join(config.dirs.logs, runId);
+    for (const [name, file] of Object.entries(config.fileLogVars)) {
+      env[name] = path.join(runLogDir, file);
+    }
+  }
   return { ...env, ...extra };
 }
 
@@ -753,6 +764,12 @@ export async function sandboxInfo() {
       ),
     },
     env_allowlist: config.envAllowlist,
+    /** Framework file logs land in logs/<run_id>/<file> (see buildEnv). */
+    log_redirect: {
+      enabled: config.logRedirect,
+      dir: 'logs/<run_id>/',
+      vars: config.fileLogVars,
+    },
     counts: { scripts: scriptCount, work_dirs: workCount, log_dirs: logCount },
   };
 }

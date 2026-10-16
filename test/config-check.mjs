@@ -73,6 +73,10 @@ assert.ok(config.shells['.ps1'] && config.shells['.js'] && config.shells['.py'],
 assert.ok(config.fsRoots.length >= 1, 'at least one allowed directory for the fs tools');
 assert.equal(config.fsRoots[0], config.dirs.root, 'first allowed directory = sandbox root');
 assert.ok(config.fsMaxWriteBytes > 0 && config.fsMaxMediaBytes > 0, 'fs size caps configured');
+// Framework file-log redirect: on by default, one target per framework.
+assert.equal(config.logRedirect, true, 'framework log redirect on by default');
+assert.ok(config.fileLogVars.LOGGING_FILE_NAME, 'Spring Boot target registered');
+assert.ok(config.fileLogVars.QUARKUS_LOG_FILE_PATH, 'Quarkus target registered');
 
 console.log('root     :', config.dirs.root);
 console.log('extensions:', config.extensions.join(', '));
@@ -103,6 +107,9 @@ const byKind = Object.fromEntries(info.languages.map((l) => [l.kind, l]));
 assert.ok(byKind.powershell?.available, 'powershell available on this device');
 assert.ok(byKind.node?.available, 'node available on this device');
 assert.ok(byKind.sh?.available, 'bash available on this device');
+// sandbox_info reports the framework file-log redirect.
+assert.equal(info.log_redirect.enabled, true, 'log redirect enabled');
+assert.equal(info.log_redirect.vars.LOGGING_FILE_NAME, 'application.log', 'log redirect target file');
 
 // Direct run without the MCP layer: .js and .ps1 must work.
 await writeScript({ name: '__configcheck/hello.js', content: 'console.log("js-ok")\n', overwrite: true });

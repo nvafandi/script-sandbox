@@ -170,14 +170,15 @@ const argsSchema = z
 
 /* ------------------------------------------------------------ sandbox_info */
 
-
 register(
   'sandbox_info',
   {
     title: 'Sandbox info',
     description:
       'Sandbox information: the root/scripts/work/logs folders, languages + interpreters available ' +
-      'on this device (with versions), limits, per-language guardrails, env allowlist, and file count.',
+      'on this device (with versions), limits, per-language guardrails, env allowlist, file count, ' +
+      'and the framework file-log redirect (Spring Boot / Quarkus file logs are written into ' +
+      'logs/<run_id>/ so running a project never drops .log files into its folder).',
     inputSchema: {},
   },
   wrap(async () => ok(await sandboxInfo())),

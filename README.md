@@ -4,11 +4,6 @@ MCP server (stdio) for running **any script** (PowerShell, bash, Python, Node.js
 Ruby, Perl, Lua, PHP, R, Java, batch, VBScript) and **any executable** inside a
 lightweight sandbox — without polluting your main working directory.
 
-It also ships the core tools of the official
-[Filesystem MCP server](https://mcpservers.org/servers/modelcontextprotocol/filesystem)
-(read/write/edit/list/search/tree/move), restricted to a configurable set of
-allowed directories instead of the whole disk.
-
 The engine is registry-driven: the interpreter is chosen automatically from the
 file extension, so adding a language means adding a registry entry, not new
 engine code. Interpreters are resolved from your machine's `PATH` at startup.
@@ -175,6 +170,10 @@ class Main {
 - Per-language guardrails against destructive patterns (`Format-Volume`,
   `rm -rf /`, `mkfs`, `shutil.rmtree('/')`, ...). Disable globally with
   `SCRIPT_SANDBOX_DENY=0` or per language with `SCRIPT_SANDBOX_DENY_OFF=sh,python`
+- Framework file logs (Spring Boot, Quarkus) are redirected into
+  `logs/<run_id>/` — a `mvn -f project`, `gradle -p project` or
+  `cd <project>` run never drops `.log` files into the project folder
+  (see [Configuration](#configuration-env-script_sandbox_))
 
 **Not guaranteed — this is not a security boundary:**
 
@@ -193,6 +192,7 @@ class Main {
 | `SCRIPT_SANDBOX_MAX_OUTPUT_BYTES` | `200000` | Output returned to the caller (full log always on disk) |
 | `SCRIPT_SANDBOX_MAX_CONCURRENT` | `2` | Max parallel runs |
 | `SCRIPT_SANDBOX_KEEP_RUNS` | `50` | Number of runs kept on disk |
+| `SCRIPT_SANDBOX_LOG_REDIRECT` | `1` | Spring Boot/Quarkus file logs → `logs/<run_id>/` (project folder stays clean) |
 | `SCRIPT_SANDBOX_MAX_SCRIPT_BYTES` | `1000000` | Max script size |
 | `SCRIPT_SANDBOX_EXTENSIONS` | (all) | Restrict allowed extensions |
 | `SCRIPT_SANDBOX_FS_ROOTS` | (empty) | Extra allowed directories for the filesystem tools, comma-separated: `D:/data,/home/me/notes` |
@@ -201,6 +201,32 @@ class Main {
 | `SCRIPT_SANDBOX_DENY` | `1` | Guardrails on/off |
 | `SCRIPT_SANDBOX_DENY_OFF` | (empty) | Disable guardrails per language kind: `sh,python` |
 | `SCRIPT_SANDBOX_SHELL_<KIND>` | (auto) | Pin an interpreter: `SCRIPT_SANDBOX_SHELL_NODE=D:/node/node.exe` |
+
+### Framework file logs (Spring Boot / Quarkus)
+
+A run starts with a working directory inside the sandbox, but build tools that
+point at a project (`mvn -f project/pom.xml`, `gradle -p project`, `./mvnw
+quarkus:dev`, or a script that `cd`s into the project) make the project folder
+the base of the framework's relative log paths. Every run therefore injects env
+vars that outrank `application.properties`/`application.yml` in both frameworks:
+
+| Framework | Env var injected | Written to |
+|---|---|---|
+| Spring Boot | `LOGGING_FILE_NAME` | `logs/<run_id>/application.log` |
+| Quarkus | `QUARKUS_LOG_FILE_PATH` | `logs/<run_id>/quarkus.log` |
+
+- An `env` value passed for that run still wins over the injected one.
+- The files live under the sandbox root, so `read_text_file` can open them.
+- Notes: the injected name activates Spring Boot's file appender (console
+  logging keeps working); Quarkus is only redirected if the project enables
+  file logging itself. Both files are pruned together with the run logs
+  (`SCRIPT_SANDBOX_KEEP_RUNS`).
+- Not redirected: values pinned on the command line (`--logging.file.name=...`,
+  `-Dquarkus.log.file.path=...`) or hard-coded in a custom `logback.xml` /
+  `log4j2.xml` — the environment cannot override those. Build output (`target/`,
+  `build/`, `dist/`) is still created next to the sources by design; that is
+  build output, not a log.
+- Disable entirely with `SCRIPT_SANDBOX_LOG_REDIRECT=0`.
 
 ## Usage flow
 

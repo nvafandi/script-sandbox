@@ -176,11 +176,15 @@ const canRun = (kind) => info.interpreters?.[kind]?.available ?? has(kind);
   console.log('  PASS  guardrail blocks, safe comments');
 }
 
-/* 7. .js + extra env + exit code + stderr + log */
+/* 7. .js + extra env + framework log redirect + exit code + stderr + log */
 {
   const w = await call('write_script', {
     name: 'smoke/info.js',
-    content: 'console.log("flag=" + (process.env.MY_FLAG || "none"));\nconsole.error("this-stderr");\nprocess.exit(3);\n',
+    content:
+      'console.log("flag=" + (process.env.MY_FLAG || "none"));\n' +
+      'console.log("spring=" + (process.env.LOGGING_FILE_NAME || "none"));\n' +
+      'console.log("quarkus=" + (process.env.QUARKUS_LOG_FILE_PATH || "none"));\n' +
+      'console.error("this-stderr");\nprocess.exit(3);\n',
     overwrite: true,
   });
   assert.ok(!w.isError && w.payload.language === 'Node.js');
@@ -189,9 +193,31 @@ const canRun = (kind) => info.interpreters?.[kind]?.available ?? has(kind);
   assert.ok(r.payload.stdout.includes('flag=yes'), 'extra env forwarded');
   assert.ok(r.payload.stderr.includes('this-stderr'), 'stderr captured');
 
+  // Framework file logs (Spring Boot / Quarkus) point into logs/<run_id>/ so a
+  // mvn/gradle run never drops .log files into the project folder.
+  assert.ok(
+    r.payload.stdout.includes(`spring=${path.join(r.payload.log_dir, 'application.log')}`),
+    'LOGGING_FILE_NAME redirected into the run log dir',
+  );
+  assert.ok(
+    r.payload.stdout.includes(`quarkus=${path.join(r.payload.log_dir, 'quarkus.log')}`),
+    'QUARKUS_LOG_FILE_PATH redirected into the run log dir',
+  );
+
+  // ...and an explicit env value from the caller still wins over the redirect.
+  const over = await call('run_script', {
+    script: 'smoke/info.js',
+    env: { LOGGING_FILE_NAME: 'custom-app.log' },
+  });
+  assert.ok(over.payload.stdout.includes('spring=custom-app.log'), 'caller env wins over redirect');
+  assert.ok(
+    over.payload.stdout.includes(`quarkus=${path.join(over.payload.log_dir, 'quarkus.log')}`),
+    'other redirect vars still apply when one is overridden',
+  );
+
   const log = await call('read_log', { run_id: r.payload.run_id, which: 'stdout' });
   assert.ok(log.payload.content.includes('flag=yes'), 'full stdout log');
-  console.log('  PASS  run .js: env/exit code/stderr/log');
+  console.log('  PASS  run .js: env/exit code/stderr/log + log redirect');
 }
 
 /* 8. .sh + CRLF normalization */

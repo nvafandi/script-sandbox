@@ -536,6 +536,18 @@ export const config = {
   maxScriptBytes: intEnv('SCRIPT_SANDBOX_MAX_SCRIPT_BYTES', 1_000_000),
   maxEnvVars: 20,
   envAllowlist: ENV_ALLOWLIST,
+  /**
+   * Framework file logs are redirected into the run's log folder (applied in
+   * buildEnv): env var -> file name. Env outranks application.properties/yml in
+   * Spring Boot and Quarkus, so this holds no matter which folder the process
+   * runs in — a `mvn -f`, `gradle -p` or `cd <project>` run leaves the project
+   * folder clean. Disable with SCRIPT_SANDBOX_LOG_REDIRECT=0.
+   */
+  fileLogVars: {
+    LOGGING_FILE_NAME: 'application.log', // Spring Boot -> logging.file.name
+    QUARKUS_LOG_FILE_PATH: 'quarkus.log', // Quarkus -> quarkus.log.file.path
+  },
+  logRedirect: boolEnv('SCRIPT_SANDBOX_LOG_REDIRECT', true),
   denyEnabled,
   denyOff,
   denySets: DENY_SETS,
