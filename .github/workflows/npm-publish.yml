@@ -24,6 +24,8 @@
 #     succeeds within 2 days of creating it.
 #   Provenance: generated automatically by npm for OIDC publishes from a
 #     public GitHub repo — no flag needed.
+#   Security           : run the Snyk dependency scan (npx snyk test) on the
+#                        same job — fails the job on new HIGH+ findings.
 #
 # Docs: https://docs.npmjs.com/trusted-publishers
 
@@ -64,6 +66,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Security gate: Snyk dependency scan (fails the job on new HIGH+ findings).
+      - name: Snyk security scan (dependencies)
+        run: npx --yes snyk test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       - name: Test (smoke + config-check + clients-check + compat-check)
         # cmd does the redirection as plain text (no PowerShell stream quirks);
