@@ -255,8 +255,7 @@ that are not installed are skipped automatically.
 The compat check proves other MCP clients / AI providers can use the server:
 paste-ready config blocks for all 10 supported clients, a raw stdio session
 without the SDK (old protocol `2024-11-05` and current `2025-03-26`), JSON-only
-stdout, strict JSON Schema tool definitions, argument + annotation parity with
-the official Filesystem MCP server.
+stdout, strict JSON Schema tool definitions.
 
 ## License
 
