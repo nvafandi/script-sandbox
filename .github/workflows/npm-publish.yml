@@ -24,8 +24,8 @@
 #     succeeds within 2 days of creating it.
 #   Provenance: generated automatically by npm for OIDC publishes from a
 #     public GitHub repo — no flag needed.
-#   Security           : run the Snyk dependency scan (npx snyk test) on the
-#                        same job — fails the job on new HIGH+ findings.
+#   Security           : job `scan` runs the Snyk dependency scan (npx snyk
+#                        test) before `test`; any finding fails the chain.
 #
 # Docs: https://docs.npmjs.com/trusted-publishers
 
@@ -47,7 +47,31 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  scan:
+    # Security gate, first in the chain: Snyk dependency scan. Any finding fails
+    # the job, so `test` and `publish` never run on a vulnerable tree. Skipped
+    # (with a note) when the secret is unavailable, e.g. fork PRs / Dependabot.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Snyk security scan (dependencies)
+        if: env.SNYK_TOKEN != ''
+        run: npx --yes snyk test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Note when the scan was skipped
+        if: env.SNYK_TOKEN == ''
+        run: Write-Host "SNYK_TOKEN is not set - dependency scan skipped."
+
   test:
+    needs: scan
     # The test suite runs PowerShell, cmd and Git Bash tools -> Windows runner.
     runs-on: windows-latest
     steps:
@@ -66,12 +90,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      # Security gate: Snyk dependency scan (fails the job on new HIGH+ findings).
-      - name: Snyk security scan (dependencies)
-        run: npx --yes snyk test
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       - name: Test (smoke + config-check + clients-check + compat-check)
         # cmd does the redirection as plain text (no PowerShell stream quirks);
@@ -174,4 +192,17 @@ jobs:
 
       - name: Publish to npm (OIDC, provenance automatic)
         if: steps.decide.outputs.publish == 'true' && steps.decide.outputs.on_registry == 'false'
-        run: npm publish
+        # cmd does the redirection as plain text (no PowerShell stream quirks);
+        # on failure the tail of the output is published as an annotation so the
+        # reason shows up on the commit page without digging through logs.
+        run: |
+          $ErrorActionPreference = 'Continue'
+          cmd /d /c "npm publish > publish-output.log 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content publish-output.log
+          if ($code -ne 0) {
+            $lines = Get-Content publish-output.log -Tail 40 | ForEach-Object { if ($_.Length -gt 300) { $_.Substring(0, 300) } else { $_ } }
+            $msg = ($lines -join "`n").Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            Write-Output "::error::npm publish failed (exit $code) - last lines: %0A$msg"
+          }
+          exit $code
