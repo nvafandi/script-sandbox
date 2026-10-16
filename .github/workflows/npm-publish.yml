@@ -58,35 +58,53 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The suite resolves bash.exe from PATH (the `sh` language + .sh runs);
+      # on hosted runners Git lives in "C:\Program Files\Git" but its bin dir is
+      # not always on PATH. Prepend it for the steps below.
+      - name: Put Git Bash on PATH
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
+
       - name: Test (smoke + config-check + clients-check + compat-check)
-        run: npm test
+        # cmd does the redirection as plain text (no PowerShell stream quirks);
+        # on failure the tail of the output is published as an annotation so the
+        # reason shows up on the commit page without digging through logs.
+        run: |
+          $ErrorActionPreference = 'Continue'
+          cmd /d /c "npm test > test-output.log 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content test-output.log
+          if ($code -ne 0) {
+            $lines = Get-Content test-output.log -Tail 40 | ForEach-Object { if ($_.Length -gt 300) { $_.Substring(0, 300) } else { $_ } }
+            $msg = ($lines -join "`n").Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            Write-Output "::error::npm test failed (exit $code) - last lines: %0A$msg"
+          }
+          exit $code
 
       - name: Decide what to publish
         id: decide
-        shell: bash
+        # PowerShell (the Windows default shell) so nothing here depends on
+        # bash being on PATH.
         run: |
-          version="$(node -p "require('./package.json').version")"
+          $ErrorActionPreference = 'Continue'
+          $version = node -p "require('./package.json').version"
+          if (-not $version) { exit 1 }
 
-          if npm view "script-sandbox@$version" version >/dev/null 2>&1; then
-            on_registry=true
-          else
-            on_registry=false
-          fi
+          npm view "script-sandbox@$version" version > $null 2>&1
+          $onRegistry = if ($LASTEXITCODE -eq 0) { 'true' } else { 'false' }
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            changed=true
-          elif ! git diff --quiet "${{ github.event.before }}" HEAD -- package.json; then
-            changed=true # also true when the range is unreadable -> fall back to trying
-          else
-            changed=false
-          fi
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $changed = 'true'
+          } else {
+            git diff --quiet '${{ github.event.before }}' HEAD -- package.json
+            # 0 = package.json untouched; anything else (changed or an
+            # unreadable range) falls back to "treat as changed".
+            $changed = if ($LASTEXITCODE -eq 0) { 'false' } else { 'true' }
+          }
 
-          {
-            echo "version=$version"
-            echo "on_registry=$on_registry"
-            echo "changed=$changed"
-          } >> "$GITHUB_OUTPUT"
-          echo "script-sandbox@$version | on registry: $on_registry | package.json changed: $changed"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "on_registry=$onRegistry"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "changed=$changed"
+          Write-Host "script-sandbox@$version | on registry: $onRegistry | package.json changed: $changed"
 
       - name: Publish to npm (OIDC, provenance automatic)
         if: steps.decide.outputs.on_registry == 'false' && steps.decide.outputs.changed == 'true'
