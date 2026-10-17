@@ -444,7 +444,10 @@ const REGISTRY = [
     candidates: [{ bin: 'cmd.exe', pre: ['/c'], flag: null }],
     comment: ['rem', "'"],
     deny: 'cmd',
-    probe: { versionArgs: ['/c', 'ver'], noopArgs: ['/c', 'exit 0'] },
+    // pre already supplies /c, so the probe args are the command itself —
+    // adding another /c here made the probe run `cmd.exe /c /c ver`, which
+    // fails and wrongly reported cmd as unavailable (.bat/.cmd unusable).
+    probe: { versionArgs: ['ver'], noopArgs: ['exit 0'] },
   },
   {
     kind: 'vbs',

@@ -75,6 +75,15 @@ let info;
   assert.ok(langs.powershell.available, 'PowerShell detected');
   assert.ok(langs.node.available, 'Node detected');
   assert.ok(langs.sh.available, 'bash detected');
+  // languages[] and interpreters{} must agree per kind (a broken probe once
+  // reported cmd as available in one list and unavailable in the other).
+  for (const l of info.languages) {
+    assert.equal(
+      l.available,
+      info.interpreters[l.kind]?.available,
+      `availability agrees for ${l.kind}`,
+    );
+  }
   console.log('  PASS  sandbox_info ok');
   console.log('  info: languages =', info.languages.filter((l) => l.available).map((l) => l.kind).join(', '));
 }
@@ -109,6 +118,10 @@ const canRun = (kind) => info.interpreters?.[kind]?.available ?? has(kind);
 
   const del = await call('delete_script', { name: 'smoke/hello.ps1' });
   assert.ok(del.payload.deleted);
+
+  // missing script -> clean NOT_FOUND (never a raw ENOENT / INTERNAL_ERROR)
+  expectCode(await call('read_script', { name: 'smoke/nope.ps1' }), 'NOT_FOUND');
+  expectCode(await call('delete_script', { name: 'smoke/nope.ps1' }), 'NOT_FOUND');
   console.log('  PASS  overwrite/list/read/delete');
 }
 
