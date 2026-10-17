@@ -36,9 +36,9 @@
  * So `npm run setup:npm` on any device is enough (the project folder may live
  * anywhere), all paths adapt accordingly.
  *
- * Note: this script only moves `command` + `environment` + `timeout`
- * and keeps an existing `disabled` flag (unless `--enable`),
- * so there is no unrequested behavior change.
+ * Note: this script only moves `command` + `environment` + `timeout`,
+ * keeps an existing `disabled` flag (unless `--enable`) and an existing
+ * `SCRIPT_SANDBOX_FS_ROOTS` value, so there is no unrequested behavior change.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -140,6 +140,10 @@ function renderBlock({ entry }, prev) {
   const out = { ...entry };
   if (hasFlag('--enable')) out.disabled = false;
   else if (prev && 'disabled' in prev) out.disabled = prev.disabled;
+  // The block is rewritten wholesale, so keep extra fs roots the user already
+  // configured instead of silently dropping them.
+  const fsRoots = prev?.environment?.SCRIPT_SANDBOX_FS_ROOTS;
+  if (fsRoots) out.environment = { ...out.environment, SCRIPT_SANDBOX_FS_ROOTS: fsRoots };
   return out;
 }
 

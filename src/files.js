@@ -93,7 +93,8 @@ async function resolveAllowed(target, label = 'path') {
   if (!roots.some((root) => isInside(root, real))) {
     throw new SandboxError(
       `${label} is outside the allowed directories: ${target} ` +
-        `(allowed: ${roots.join(', ')})`,
+        `(allowed: ${roots.join(', ')}). ` +
+        'Add the parent folder to SCRIPT_SANDBOX_FS_ROOTS in the server env to allow it.',
       'PATH_ESCAPE',
     );
   }
