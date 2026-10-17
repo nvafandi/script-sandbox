@@ -155,9 +155,32 @@ export async function writeScript({ name, content, overwrite = false }) {
   };
 }
 
+/** stat/unlink a resolved script, mapping ENOENT to a clean NOT_FOUND. */
+async function statScript(target, name) {
+  try {
+    return await fsp.stat(target);
+  } catch (err) {
+    if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
+      throw new SandboxError(`Script not found: ${name}`, 'NOT_FOUND');
+    }
+    throw new SandboxError(`Cannot read script: ${err.message}`, 'IO_ERROR');
+  }
+}
+
+async function unlinkScript(target, name) {
+  try {
+    await fsp.unlink(target);
+  } catch (err) {
+    if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
+      throw new SandboxError(`Script not found: ${name}`, 'NOT_FOUND');
+    }
+    throw new SandboxError(`Cannot delete script: ${err.message}`, 'IO_ERROR');
+  }
+}
+
 export async function readScript(name) {
   const target = await resolveScriptPath(name);
-  const stat = await fsp.stat(target);
+  const stat = await statScript(target, name);
   return {
     name: path.relative(config.dirs.scripts, target).split(path.sep).join('/'),
     size_bytes: stat.size,
@@ -168,7 +191,7 @@ export async function readScript(name) {
 
 export async function deleteScript(name) {
   const target = await resolveScriptPath(name);
-  await fsp.unlink(target);
+  await unlinkScript(target, name);
   return {
     name: path.relative(config.dirs.scripts, target).split(path.sep).join('/'),
     deleted: true,
